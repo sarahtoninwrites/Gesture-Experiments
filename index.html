@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Gesture Magic</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Hidden video element for raw input -->
+        <video class="input_video"></video>
+        <!-- Canvas for drawing output and effects -->
+        <canvas class="output_canvas"></canvas>
+        <div id="status">Loading AI Model...</div>
+        <div id="timer">60s</div>
+        
+        <!-- Studio Mesmer Website Content (Hidden initially) -->
+        <div id="website-content" style="display: none;">
+            <nav>
+                <h1>STUDIO MESMER</h1>
+                <ul>
+                    <li>Work</li>
+                    <li>About</li>
+                    <li>Contact</li>
+                </ul>
+            </nav>
+            <section class="hero">
+                <h2>We create digital magic.</h2>
+                <p>Scroll to explore your creation.</p>
+            </section>
+            <section class="content">
+                <h3>Our Philosophy</h3>
+                <p>At Studio Mesmer, we believe that code is the new canvas. We blend gesture recognition, generative art, and web technologies to create immersive experiences that captivate and inspire.</p>
+                
+                <h3>Selected Works</h3>
+                <div class="project">
+                    <h4>Project Alpha</h4>
+                    <p>Interactive installation for the Modern Art Museum.</p>
+                </div>
+                <div class="project">
+                    <h4>Project Beta</h4>
+                    <p>Gesture-controlled lighting system for smart homes.</p>
+                </div>
+                <div class="project">
+                    <h4>Project Gamma</h4>
+                    <p>AI-driven generative branding for tech startups.</p>
+                </div>
+            </section>
+            <footer>
+                <p>&copy; 2026 Studio Mesmer. Designed by You.</p>
+            </footer>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
