@@ -2,15 +2,28 @@ const videoElement = document.getElementsByClassName('input_video')[0];
 const canvasElement = document.getElementsByClassName('output_canvas')[0];
 const canvasCtx = canvasElement.getContext('2d');
 const statusElement = document.getElementById('status');
-const timerElement = document.getElementById('timer');
+const questionTextElement = document.getElementById('question-text');
+const optionsContainerElement = document.getElementById('options-container');
 
 // State management
 let lastGestures = {};
 let particles = [];
-let strokes = [];
-let activeStrokes = {};
-let gameStartTime = null;
-let gameEnded = false;
+let gameWon = false;
+let currentQuestionIndex = 0;
+let selectionTimeout = null;
+let currentPalmPosition = { x: 0, y: 0 };
+
+// Gesture Lab State
+let gestureLabActive = false;
+let labState = { x: 0, y: 0, scale: 1, lastHandX: null, lastHandY: null, lastPinchDist: null, isPinching: false };
+const triviaData = [
+    { question: "Oh hi! We didn't see you there. We're Studio Mesmer. We're a bit shy... how did you even find us?", options: ["Google Search", "Instagram", "Telepathy", "I followed the sparkles"], correctAnswer: 3 },
+    { question: "Okay, valid. Since you're here, we should probably ask... what are you looking for?", options: ["Just browsing", "Serious Business", "Digital Sorcery", "A good time"], correctAnswer: 2 },
+    { question: "We're really into creative tech. How do you feel about... *gestures vaguely*... the future?", options: ["Scary", "Exciting", "Needs more lasers", "It's already here"], correctAnswer: 2 },
+    { question: "Almost ready to show you our work. But first, what's the secret password?", options: ["Password123", "Open Sesame", "Please?", "✨Magic✨"], correctAnswer: 3 },
+    { question: "Okay, you seem cool. Ready to enter the studio?", options: ["Born ready", "Maybe later", "Yes!", "Let me in!"], correctAnswer: 0 }
+];
+
 
 // --- 1. EFFECT SYSTEM ---
 
@@ -20,9 +33,9 @@ class Particle {
         this.x = x;
         this.y = y;
         this.color = color;
-        this.size = Math.random() * 100 + 50;
-        this.speedX = Math.random() * 50 - 25;
-        this.speedY = Math.random() * 50 - 25;
+        this.size = Math.random() * 20 + 10;
+        this.speedX = Math.random() * 20 - 10;
+        this.speedY = Math.random() * 20 - 10;
     }
     update() {
         this.x += this.speedX;
@@ -63,13 +76,19 @@ function detectGesture(landmarks) {
     // Joints (PIP/MCP) used for comparison: 2, 6, 10, 14, 18
     
     const indexUp = isFingerExtended(landmarks, 8, 6);
+
+    // Pinch Gesture: Index finger tip and thumb tip are close.
+    const thumbTip = landmarks[4];
+    const indexTip = landmarks[8];
+    const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+    if (pinchDist < 0.06) {
+        return "Pinch";
+    }
+
     const middleUp = isFingerExtended(landmarks, 12, 10);
     const ringUp = isFingerExtended(landmarks, 16, 14);
     const pinkyUp = isFingerExtended(landmarks, 20, 18);
-    
-    // Thumb is tricky because it moves horizontally. 
-    // We'll skip it for a simple "Open/Closed" check or check X distance.
-    
+
     let fingersUpCount = 0;
     if (indexUp) fingersUpCount++;
     if (middleUp) fingersUpCount++;
@@ -79,148 +98,217 @@ function detectGesture(landmarks) {
     if (fingersUpCount >= 4) return "Open Palm";
     if (fingersUpCount === 0) return "Closed Fist";
     if (indexUp && !middleUp && !ringUp && !pinkyUp) return "Index Finger";
-    if (indexUp && middleUp && !ringUp && !pinkyUp) return "Victory";
     
     return "Unknown";
 }
 
 // --- 3. MEDIAPIPE SETUP ---
 
-function onResults(results) {
-    if (gameEnded) return;
-
-    // Initialize timer on first frame
-    if (!gameStartTime) gameStartTime = Date.now();
-
-    // Calculate Time
-    const elapsed = Date.now() - gameStartTime;
-    const timeLeft = Math.max(0, Math.ceil((60000 - elapsed) / 1000));
-    if (timerElement) timerElement.innerText = timeLeft + "s";
-
-    // Game Over Logic
-    if (timeLeft <= 0) {
-        gameEnded = true;
-        
-        // Draw Final Static Background (No Video, No Skeletons)
-        canvasCtx.save();
-        canvasCtx.fillStyle = '#1e1e1e';
-        canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
-        
-        // Draw Strokes Only
-        drawStrokes();
-        canvasCtx.restore();
-
-        // Hide Game UI
-        statusElement.style.display = 'none';
-        timerElement.style.display = 'none';
-
-        // Show Studio Mesmer Website
-        document.getElementById('website-content').style.display = 'block';
-
-        if (typeof camera !== 'undefined') camera.stop();
+function updateTriviaUI() {
+    if (gameWon) {
+        questionTextElement.style.display = 'none';
+        optionsContainerElement.style.display = 'none';
         return;
     }
+    const question = triviaData[currentQuestionIndex];
+    questionTextElement.innerText = question.question;
+    optionsContainerElement.innerHTML = '';
 
-    // 1. Prepare Canvas
+    question.options.forEach(optionText => {
+        const box = document.createElement('div');
+        box.className = 'option-box';
+        box.innerText = optionText;
+        optionsContainerElement.appendChild(box);
+    });
+}
+
+function checkAnswer(selectedIndex) {
+    statusElement.innerText = "Vibe check passed! ✨";
+    const x = canvasElement.width - currentPalmPosition.x;
+    const y = currentPalmPosition.y;
+    for (let i = 0; i < 100; i++) {
+        particles.push(new Particle(x, y, `hsl(${Math.random() * 60 + 20}, 100%, 70%)`));
+    }
+
+    currentQuestionIndex++;
+    if (currentQuestionIndex >= triviaData.length) {
+        gameWon = true;
+        setTimeout(unlockWebsite, 2000);
+    } else {
+        updateTriviaUI();
+    }
+    clearTimeout(selectionTimeout);
+    selectionTimeout = null;
+}
+
+function unlockWebsite() {
+    const triviaContainer = document.getElementById('trivia-container');
+    if (triviaContainer) triviaContainer.style.display = 'none';
+    if (statusElement) statusElement.style.display = 'none';
+    canvasElement.style.display = 'none';
+    camera.stop();
+
+    document.getElementById('website-content').style.display = 'block';
+}
+
+function enterGestureLab() {
+    document.getElementById('website-content').style.display = 'none';
+    document.getElementById('gesture-lab').style.display = 'block';
+    gestureLabActive = true;
+    camera.start(); // Restart camera for tracking
+}
+
+function exitGestureLab() {
+    document.getElementById('gesture-lab').style.display = 'none';
+    document.getElementById('website-content').style.display = 'block';
+    gestureLabActive = false;
+    camera.stop(); // Save resources
+}
+
+function updateLabTransform() {
+    const viewport = document.getElementById('lab-viewport');
+    if (viewport) {
+        viewport.style.transform = `translate3d(${labState.x}px, ${labState.y}px, 0) scale(${labState.scale})`;
+    }
+}
+
+function onResults(results) {
+    // --- GESTURE LAB LOGIC ---
+    if (gestureLabActive) {
+        const labCards = document.querySelectorAll('.lab-card');
+        labCards.forEach(card => card.classList.remove('hover'));
+
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const handsCount = results.multiHandLandmarks.length;
+
+            // --- Single Hand Interactions (Hover, Select, Pan) ---
+            if (handsCount === 1) {
+                const landmarks = results.multiHandLandmarks[0];
+                const gesture = detectGesture(landmarks);
+                const handPos = {
+                    x: (1 - landmarks[8].x) * window.innerWidth, // Mirrored X for index tip
+                    y: landmarks[8].y * window.innerHeight
+                };
+    
+                // Hover Detection
+                let cardHovered = false;
+                labCards.forEach(card => {
+                    const rect = card.getBoundingClientRect();
+                    if (handPos.x > rect.left && handPos.x < rect.right && handPos.y > rect.top && handPos.y < rect.bottom) {
+                        cardHovered = true;
+                        card.classList.add('hover');
+    
+                        // Selection via Pinch
+                        if (gesture === "Pinch") {
+                            if (!labState.isPinching) { // Fire only once per pinch action
+                                card.classList.toggle('selected');
+                            }
+                            labState.isPinching = true;
+                        } else {
+                            labState.isPinching = false;
+                        }
+                    }
+                });
+    
+                // Panning via Closed Fist
+                if (gesture === "Closed Fist") {
+                    const currentX = landmarks[9].x * window.innerWidth; // Use palm center for panning
+                    const currentY = landmarks[9].y * window.innerHeight;
+    
+                    if (labState.lastHandX !== null) {
+                        const deltaX = currentX - labState.lastHandX;
+                        const deltaY = currentY - labState.lastHandY;
+                        labState.x += deltaX;
+                        labState.y += deltaY;
+                    }
+                    labState.lastHandX = currentX;
+                    labState.lastHandY = currentY;
+                } else { // Reset panning state if not a closed fist
+                    labState.lastHandX = null;
+                    labState.lastHandY = null;
+                }
+            }
+    
+            // --- Two Hand Interactions (Zoom) ---
+            if (handsCount === 2) {
+                const h1 = results.multiHandLandmarks[0][9]; // Palm center of hand 1
+                const h2 = results.multiHandLandmarks[1][9]; // Palm center of hand 2
+                const dist = Math.hypot(h1.x - h2.x, h1.y - h2.y);
+    
+                if (labState.lastPinchDist !== null) {
+                    const delta = dist - labState.lastPinchDist;
+                    labState.scale += delta * 3; // Zoom sensitivity
+                    labState.scale = Math.max(0.1, Math.min(labState.scale, 5)); // Clamp zoom
+                }
+                labState.lastPinchDist = dist;
+            } else {
+                labState.lastPinchDist = null;
+            }
+        } else {
+            // Reset all tracking states if no hands are visible
+            labState.lastHandX = null;
+            labState.lastHandY = null;
+            labState.lastPinchDist = null;
+            labState.isPinching = false;
+        }
+        updateLabTransform();
+        return; // Skip the rest of the render loop
+    }
+
     canvasElement.width = window.innerWidth;
     canvasElement.height = window.innerHeight;
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-    
-    // 2. Draw Video Feed
-    // Make the main screen a blank canvas
-    canvasCtx.fillStyle = '#1e1e1e';
-    canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
-    // Draw Strokes
-    drawStrokes();
-
-    // Draw the video feed as a small screen on the top right (PIP)
-    // Note: Since the canvas is mirrored via CSS, drawing at x=0 puts it on the visual Right.
+    // Draw PIP video feed
     const pipWidth = canvasElement.width * 0.25;
     const pipHeight = pipWidth * (9/16);
     canvasCtx.drawImage(results.image, 0, 0, pipWidth, pipHeight);
-    canvasCtx.strokeStyle = '#ffffff';
-    canvasCtx.lineWidth = 2;
-    canvasCtx.strokeRect(0, 0, pipWidth, pipHeight);
 
-    // 3. Handle Hand Detection
+    // Reset hover styles
+    const domBoxes = optionsContainerElement.children;
+    for (let box of domBoxes) box.classList.remove('hover');
+
+    let handOverOption = false;
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        statusElement.innerText = "Hand Detected!";
-        
+        statusElement.innerText = "Hold an Open Palm over your answer";
         for (const [index, landmarks] of results.multiHandLandmarks.entries()) {
-            const label = results.multiHandedness && results.multiHandedness[index] ? results.multiHandedness[index].label : index;
-
-            // Draw the skeleton
             drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
             drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
 
-            // Detect Gesture
             const gesture = detectGesture(landmarks);
-            
-            // Drawing Logic
-            if (gesture === "Index Finger") {
-                const x = landmarks[8].x * canvasElement.width;
-                const y = landmarks[8].y * canvasElement.height;
-                
-                if (!activeStrokes[label]) {
-                    // Start new stroke
-                    const color = `hsl(${Math.random() * 360}, 100%, 50%)`;
-                    const newStroke = { color: color, points: [{x, y}] };
-                    strokes.push(newStroke);
-                    activeStrokes[label] = newStroke;
-                } else {
-                    // Continue existing stroke
-                    activeStrokes[label].points.push({x, y});
-                }
-            } else {
-                delete activeStrokes[label];
-            }
+            if (gesture === 'Open Palm') {
+                // Use palm center (landmark 9) for collision, but flip X coord due to mirroring
+                const handX = (1 - landmarks[9].x) * canvasElement.width;
+                const handY = landmarks[9].y * canvasElement.height;
+                currentPalmPosition = { x: handX, y: handY };
 
-            // Display Gesture Name
-            canvasCtx.fillStyle = "yellow";
-            canvasCtx.font = "30px Arial";
-            canvasCtx.fillText(gesture, landmarks[0].x * canvasElement.width, landmarks[0].y * canvasElement.height);
-
-            // Trigger Event on State Change
-            const lastGesture = lastGestures[label] || "";
-            if (gesture !== lastGesture && gesture !== "Unknown") {
-                if (lastGesture === "Closed Fist" && gesture === "Open Palm") {
-                    // Special Splash Effect
-                    // Use Middle Finger MCP (9) as center of palm
-                    const x = landmarks[9].x * canvasElement.width;
-                    const y = landmarks[9].y * canvasElement.height;
-                    for (let i = 0; i < 200; i++) {
-                        const color = `hsl(${Math.random() * 360}, 100%, 50%)`;
-                        particles.push(new Particle(x, y, color));
+                for (let i = 0; i < domBoxes.length; i++) {
+                    const box = domBoxes[i].getBoundingClientRect();
+                    if (handX > box.left && handX < box.right && handY > box.top && handY < box.bottom) {
+                        handOverOption = true;
+                        if (domBoxes[i]) domBoxes[i].classList.add('hover');
+                        if (selectionTimeout === null) {
+                            statusElement.innerText = "Selecting...";
+                            selectionTimeout = setTimeout(() => checkAnswer(i), 1500);
+                        }
+                        break;
                     }
                 }
-                lastGestures[label] = gesture;
             }
         }
     } else {
         statusElement.innerText = "Show your hand to the camera";
     }
 
-    // 4. Render Active Effect
+    if (!handOverOption && selectionTimeout) {
+        clearTimeout(selectionTimeout);
+        selectionTimeout = null;
+    }
+
     effects.splash(canvasCtx, canvasElement.width, canvasElement.height);
 
     canvasCtx.restore();
-}
-
-function drawStrokes() {
-    canvasCtx.lineWidth = 5;
-    canvasCtx.lineCap = 'round';
-    canvasCtx.lineJoin = 'round';
-    for (const stroke of strokes) {
-        canvasCtx.strokeStyle = stroke.color;
-        canvasCtx.beginPath();
-        for (let i = 0; i < stroke.points.length; i++) {
-            const p = stroke.points[i];
-            i === 0 ? canvasCtx.moveTo(p.x, p.y) : canvasCtx.lineTo(p.x, p.y);
-        }
-        canvasCtx.stroke();
-    }
 }
 
 const hands = new Hands({locateFile: (file) => {
@@ -244,4 +332,5 @@ const camera = new Camera(videoElement, {
     height: 720
 });
 
+updateTriviaUI();
 camera.start();
