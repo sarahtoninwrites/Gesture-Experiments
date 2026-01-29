@@ -2,65 +2,229 @@ const videoElement = document.getElementsByClassName('input_video')[0];
 const canvasElement = document.getElementsByClassName('output_canvas')[0];
 const canvasCtx = canvasElement.getContext('2d');
 const statusElement = document.getElementById('status');
-const questionTextElement = document.getElementById('question-text');
-const optionsContainerElement = document.getElementById('options-container');
+const spellNameElement = document.getElementById('spell-name');
+const instructionElement = document.getElementById('instruction');
+const feedbackElement = document.getElementById('feedback');
+const gameHudElement = document.getElementById('game-hud');
+const discoveriesElement = document.getElementById('discoveries');
 
 // State management
-let lastGestures = {};
 let particles = [];
-let gameWon = false;
-let currentQuestionIndex = 0;
-let selectionTimeout = null;
-let currentPalmPosition = { x: 0, y: 0 };
+let currentLessonIndex = 0;
+let spellCooldown = false;
 
-// Gesture Lab State
-let gestureLabActive = false;
-let labState = { x: 0, y: 0, scale: 1, lastHandX: null, lastHandY: null, lastPinchDist: null, isPinching: false };
-const triviaData = [
-    { question: "Oh hi! We didn't see you there. We're Studio Mesmer. We're a bit shy... how did you even find us?", options: ["Google Search", "Instagram", "Telepathy", "I followed the sparkles"], correctAnswer: 3 },
-    { question: "Okay, valid. Since you're here, we should probably ask... what are you looking for?", options: ["Just browsing", "Serious Business", "Digital Sorcery", "A good time"], correctAnswer: 2 },
-    { question: "We're really into creative tech. How do you feel about... *gestures vaguely*... the future?", options: ["Scary", "Exciting", "Needs more lasers", "It's already here"], correctAnswer: 2 },
-    { question: "Almost ready to show you our work. But first, what's the secret password?", options: ["Password123", "Open Sesame", "Please?", "✨Magic✨"], correctAnswer: 3 },
-    { question: "Okay, you seem cool. Ready to enter the studio?", options: ["Born ready", "Maybe later", "Yes!", "Let me in!"], correctAnswer: 0 }
+// Game State
+let gameActive = false;
+let interactables = [];
+let discoveries = 0;
+
+const lessons = [
+    { 
+        id: "lumos",
+        title: "Lumos", 
+        instruction: "Show an Open Palm to summon light.", 
+        gesture: "Open Palm",
+        color: "255, 255, 255" 
+    },
+    { 
+        id: "incendio",
+        title: "Incendio", 
+        instruction: "Clench a Closed Fist to cast fire.", 
+        gesture: "Closed Fist",
+        color: "255, 69, 0"
+    },
+    { 
+        id: "fulgura",
+        title: "Fulgura", 
+        instruction: "Point your Index Finger to spark lightning.", 
+        gesture: "Index Finger",
+        color: "255, 215, 0"
+    },
+    { 
+        id: "celebratio",
+        title: "Celebratio", 
+        instruction: "Flash a Victory sign to celebrate!", 
+        gesture: "Victory",
+        color: "random"
+    }
 ];
-
 
 // --- 1. EFFECT SYSTEM ---
 
-// A simple particle system for the "Confetti" effect
-class Particle {
-    constructor(x, y, color) {
-        this.x = x;
-        this.y = y;
-        this.color = color;
-        this.size = Math.random() * 20 + 10;
-        this.speedX = Math.random() * 20 - 10;
-        this.speedY = Math.random() * 20 - 10;
+class Interactable {
+    constructor(w, h) {
+        this.x = Math.random() * w;
+        this.y = Math.random() * h;
+        this.z = Math.random() * 1000; // Depth
+        this.size = Math.random() * 20 + 30;
+        // Types correspond to spells: rune->lumos, torch->incendio, crystal->fulgura, seed->celebratio
+        const types = ['rune', 'torch', 'crystal', 'seed'];
+        this.type = types[Math.floor(Math.random() * types.length)];
+        this.active = false;
+        this.driftX = (Math.random() - 0.5) * 0.2; // Slower drift
+        this.driftY = (Math.random() - 0.5) * 0.2;
+        
+        // Initial visual state
+        this.alpha = this.type === 'rune' ? 0.1 : 0.6; // Runes are barely visible
+        this.color = '#555';
     }
-    update() {
-        this.x += this.speedX;
-        this.y += this.speedY;
-        this.size *= 0.96; // Shrink over time
+
+    update(w, h, handX, handY) {
+        this.x += this.driftX;
+        this.y += this.driftY;
+
+        // Wrap around screen
+        if (this.x < -50) this.x = w + 50;
+        if (this.x > w + 50) this.x = -50;
+        if (this.y < -50) this.y = h + 50;
+        if (this.y > h + 50) this.y = -50;
+
+        // Parallax effect based on hand position
+        if (handX && handY) {
+            const parallaxFactor = (1000 - this.z) / 1000; // 0 (far) to 1 (close)
+            const offsetX = (handX - w / 2);
+            const offsetY = (handY - h / 2);
+            this.x -= (offsetX / w) * parallaxFactor * 20; // Sensitivity
+            this.y -= (offsetY / h) * parallaxFactor * 20;
+        }
     }
+
+    activate() {
+        if (this.active) return;
+        this.active = true;
+        this.alpha = 1;
+        discoveries++;
+        discoveriesElement.innerText = "Discoveries: " + discoveries;
+    }
+
     draw(ctx) {
-        ctx.fillStyle = this.color;
+        const scale = Math.max(0.1, (1000 - this.z) / 1000); // Scale based on depth, with a minimum size
+        
+        ctx.save();
+        ctx.globalAlpha = this.active ? 1 : this.alpha * scale;
+        
         ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.fill();
+        if (this.type === 'rune') {
+            ctx.fillStyle = this.active ? '#fff' : '#444';
+            ctx.font = `${40 * scale}px serif`;
+            ctx.fillText("ᚣ", this.x, this.y);
+        } else if (this.type === 'torch') {
+            ctx.fillStyle = this.active ? '#e67e22' : '#5d4037';
+            ctx.arc(this.x, this.y, 15 * scale, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (this.type === 'crystal') {
+            ctx.fillStyle = this.active ? '#00ffff' : '#2c3e50';
+            const size = 20 * scale;
+            ctx.moveTo(this.x, this.y - size);
+            ctx.lineTo(this.x + size * 0.75, this.y);
+            ctx.lineTo(this.x, this.y + size);
+            ctx.lineTo(this.x - size * 0.75, this.y);
+            ctx.fill();
+        } else if (this.type === 'seed') {
+            ctx.fillStyle = this.active ? '#e91e63' : '#2ecc71';
+            ctx.arc(this.x, this.y, (this.active ? 25 : 10) * scale, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
     }
 }
 
-const effects = {
-    // Effect 4: Paint Splash
-    splash: (ctx, width, height) => {
-        for (let i = 0; i < particles.length; i++) {
-            particles[i].update();
-            particles[i].draw(ctx);
+class Particle {
+    constructor(x, y, type) {
+        this.x = x;
+        this.y = y;
+        this.type = type;
+        this.life = 1.0;
+        
+        if (type === 'lumos') {
+            this.vx = 0;
+            this.vy = 0;
+            this.size = Math.random() * 100 + 200; 
+            this.life = 0.2; // Short life, continuous stream
+        } else if (type === 'incendio') {
+            this.vx = (Math.random() - 0.5) * 8;
+            this.vy = -Math.random() * 8 - 8; // Upwards
+            this.size = Math.random() * 50 + 40;
+        } else if (type === 'fulgura') {
+            // Lightning bolts path relative to origin
+            this.path = [{x: 0, y: 0}]; 
+            let cx = 0, cy = 0;
+            for(let i=0; i<4; i++) {
+                cx += (Math.random() - 0.5) * 500;
+                cy += (Math.random() - 0.5) * 500;
+                this.path.push({x: cx, y: cy});
+            }
+            this.life = 0.4;
+        } else if (type === 'celebratio') {
+            this.vx = (Math.random() - 0.5) * 15;
+            this.vy = (Math.random() - 0.5) * 15;
+            this.size = Math.random() * 20 + 15;
+            this.color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+            this.gravity = 0.8;
         }
-        // Remove tiny particles
-        particles = particles.filter(p => p.size > 0.5);
     }
-};
+    update() {
+        if (this.type === 'lumos') {
+            this.life -= 0.05;
+        } else if (this.type === 'incendio') {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.size *= 0.92;
+            this.life -= 0.03;
+        } else if (this.type === 'fulgura') {
+            this.life -= 0.1;
+        } else if (this.type === 'celebratio') {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.vy += this.gravity;
+            this.life -= 0.01;
+        }
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, this.life);
+
+        if (this.type === 'lumos') {
+            const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+            grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = grad;
+            ctx.globalCompositeOperation = 'screen';
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (this.type === 'incendio') {
+            ctx.fillStyle = `rgba(255, ${Math.floor(this.life * 200)}, 0, ${this.life})`;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (this.type === 'fulgura') {
+            // Outer Glow
+            ctx.strokeStyle = `rgba(175, 238, 238, ${this.life * 0.5})`;
+            ctx.lineWidth = 20;
+            ctx.shadowBlur = 70;
+            ctx.shadowColor = '#00ffff';
+            ctx.beginPath();
+            ctx.moveTo(this.x + this.path[0].x, this.y + this.path[0].y);
+            for(let i=1; i<this.path.length; i++) {
+                ctx.lineTo(this.x + this.path[i].x, this.y + this.path[i].y);
+            }
+            ctx.stroke();
+
+            // Inner Core
+            ctx.strokeStyle = `rgba(255, 255, 255, ${this.life})`;
+            ctx.lineWidth = 8;
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#fff';
+            ctx.stroke(); // Redraw the same path with different styles
+        } else if (this.type === 'celebratio') {
+            ctx.fillStyle = this.color;
+            ctx.fillRect(this.x, this.y, this.size, this.size);
+        }
+
+        ctx.restore();
+    }
+}
 
 // --- 2. GESTURE RECOGNITION LOGIC ---
 
@@ -76,15 +240,6 @@ function detectGesture(landmarks) {
     // Joints (PIP/MCP) used for comparison: 2, 6, 10, 14, 18
     
     const indexUp = isFingerExtended(landmarks, 8, 6);
-
-    // Pinch Gesture: Index finger tip and thumb tip are close.
-    const thumbTip = landmarks[4];
-    const indexTip = landmarks[8];
-    const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
-    if (pinchDist < 0.06) {
-        return "Pinch";
-    }
-
     const middleUp = isFingerExtended(landmarks, 12, 10);
     const ringUp = isFingerExtended(landmarks, 16, 14);
     const pinkyUp = isFingerExtended(landmarks, 20, 18);
@@ -97,6 +252,7 @@ function detectGesture(landmarks) {
 
     if (fingersUpCount >= 4) return "Open Palm";
     if (fingersUpCount === 0) return "Closed Fist";
+    if (indexUp && middleUp && !ringUp && !pinkyUp) return "Victory";
     if (indexUp && !middleUp && !ringUp && !pinkyUp) return "Index Finger";
     
     return "Unknown";
@@ -104,195 +260,130 @@ function detectGesture(landmarks) {
 
 // --- 3. MEDIAPIPE SETUP ---
 
-function updateTriviaUI() {
-    if (gameWon) {
-        questionTextElement.style.display = 'none';
-        optionsContainerElement.style.display = 'none';
-        return;
-    }
-    const question = triviaData[currentQuestionIndex];
-    questionTextElement.innerText = question.question;
-    optionsContainerElement.innerHTML = '';
-
-    question.options.forEach(optionText => {
-        const box = document.createElement('div');
-        box.className = 'option-box';
-        box.innerText = optionText;
-        optionsContainerElement.appendChild(box);
-    });
-}
-
-function checkAnswer(selectedIndex) {
-    statusElement.innerText = "Vibe check passed! ✨";
-    const x = canvasElement.width - currentPalmPosition.x;
-    const y = currentPalmPosition.y;
-    for (let i = 0; i < 100; i++) {
-        particles.push(new Particle(x, y, `hsl(${Math.random() * 60 + 20}, 100%, 70%)`));
-    }
-
-    currentQuestionIndex++;
-    if (currentQuestionIndex >= triviaData.length) {
-        gameWon = true;
-        setTimeout(unlockWebsite, 2000);
+function updateLessonUI() {
+    if (currentLessonIndex >= lessons.length) {
+        spellNameElement.innerText = "The Ethereal Void";
+        instructionElement.innerText = "Explore and awaken the dormant magic.";
+        statusElement.innerText = "Cast spells to interact.";
+        gameActive = true;
+        gameHudElement.style.display = 'block';
     } else {
-        updateTriviaUI();
+        const lesson = lessons[currentLessonIndex];
+        spellNameElement.innerText = lesson.title;
+        instructionElement.innerText = lesson.instruction;
     }
-    clearTimeout(selectionTimeout);
-    selectionTimeout = null;
 }
 
-function unlockWebsite() {
-    const triviaContainer = document.getElementById('trivia-container');
-    if (triviaContainer) triviaContainer.style.display = 'none';
-    if (statusElement) statusElement.style.display = 'none';
-    canvasElement.style.display = 'none';
-    camera.stop();
+function triggerSpellEffect(x, y, type) {
+    let count = 3;
+    if (type === 'incendio') count = 15;
+    if (type === 'fulgura') count = 3;
+    if (type === 'celebratio') count = 50;
 
-    document.getElementById('website-content').style.display = 'block';
-}
-
-function enterGestureLab() {
-    document.getElementById('website-content').style.display = 'none';
-    document.getElementById('gesture-lab').style.display = 'block';
-    gestureLabActive = true;
-    camera.start(); // Restart camera for tracking
-}
-
-function exitGestureLab() {
-    document.getElementById('gesture-lab').style.display = 'none';
-    document.getElementById('website-content').style.display = 'block';
-    gestureLabActive = false;
-    camera.stop(); // Save resources
-}
-
-function updateLabTransform() {
-    const viewport = document.getElementById('lab-viewport');
-    if (viewport) {
-        viewport.style.transform = `translate3d(${labState.x}px, ${labState.y}px, 0) scale(${labState.scale})`;
+    for (let i = 0; i < count; i++) {
+        particles.push(new Particle(x, y, type));
     }
+}
+
+function updateExploration(canvasWidth, canvasHeight, handX, handY) {
+    if (!gameActive) return;
+
+    // Initial Spawn
+    if (interactables.length < 25) { // More objects for a denser scene
+        interactables.push(new Interactable(canvasWidth, canvasHeight));
+    }
+
+    interactables.forEach(obj => obj.update(canvasWidth, canvasHeight, handX, handY));
+    
+    // Sort by depth so we draw far objects first
+    interactables.sort((a, b) => a.z - b.z);
 }
 
 function onResults(results) {
-    // --- GESTURE LAB LOGIC ---
-    if (gestureLabActive) {
-        const labCards = document.querySelectorAll('.lab-card');
-        labCards.forEach(card => card.classList.remove('hover'));
-
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            const handsCount = results.multiHandLandmarks.length;
-
-            // --- Single Hand Interactions (Hover, Select, Pan) ---
-            if (handsCount === 1) {
-                const landmarks = results.multiHandLandmarks[0];
-                const gesture = detectGesture(landmarks);
-                const handPos = {
-                    x: (1 - landmarks[8].x) * window.innerWidth, // Mirrored X for index tip
-                    y: landmarks[8].y * window.innerHeight
-                };
-    
-                // Hover Detection
-                let cardHovered = false;
-                labCards.forEach(card => {
-                    const rect = card.getBoundingClientRect();
-                    if (handPos.x > rect.left && handPos.x < rect.right && handPos.y > rect.top && handPos.y < rect.bottom) {
-                        cardHovered = true;
-                        card.classList.add('hover');
-    
-                        // Selection via Pinch
-                        if (gesture === "Pinch") {
-                            if (!labState.isPinching) { // Fire only once per pinch action
-                                card.classList.toggle('selected');
-                            }
-                            labState.isPinching = true;
-                        } else {
-                            labState.isPinching = false;
-                        }
-                    }
-                });
-    
-                // Panning via Closed Fist
-                if (gesture === "Closed Fist") {
-                    const currentX = landmarks[9].x * window.innerWidth; // Use palm center for panning
-                    const currentY = landmarks[9].y * window.innerHeight;
-    
-                    if (labState.lastHandX !== null) {
-                        const deltaX = currentX - labState.lastHandX;
-                        const deltaY = currentY - labState.lastHandY;
-                        labState.x += deltaX;
-                        labState.y += deltaY;
-                    }
-                    labState.lastHandX = currentX;
-                    labState.lastHandY = currentY;
-                } else { // Reset panning state if not a closed fist
-                    labState.lastHandX = null;
-                    labState.lastHandY = null;
-                }
-            }
-    
-            // --- Two Hand Interactions (Zoom) ---
-            if (handsCount === 2) {
-                const h1 = results.multiHandLandmarks[0][9]; // Palm center of hand 1
-                const h2 = results.multiHandLandmarks[1][9]; // Palm center of hand 2
-                const dist = Math.hypot(h1.x - h2.x, h1.y - h2.y);
-    
-                if (labState.lastPinchDist !== null) {
-                    const delta = dist - labState.lastPinchDist;
-                    labState.scale += delta * 3; // Zoom sensitivity
-                    labState.scale = Math.max(0.1, Math.min(labState.scale, 5)); // Clamp zoom
-                }
-                labState.lastPinchDist = dist;
-            } else {
-                labState.lastPinchDist = null;
-            }
-        } else {
-            // Reset all tracking states if no hands are visible
-            labState.lastHandX = null;
-            labState.lastHandY = null;
-            labState.lastPinchDist = null;
-            labState.isPinching = false;
-        }
-        updateLabTransform();
-        return; // Skip the rest of the render loop
-    }
-
     canvasElement.width = window.innerWidth;
     canvasElement.height = window.innerHeight;
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
-    // Draw PIP video feed
-    const pipWidth = canvasElement.width * 0.25;
-    const pipHeight = pipWidth * (9/16);
-    canvasCtx.drawImage(results.image, 0, 0, pipWidth, pipHeight);
+    // Draw background (hide video feed)
+    canvasCtx.fillStyle = '#1e1e1e';
+    canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
-    // Reset hover styles
-    const domBoxes = optionsContainerElement.children;
-    for (let box of domBoxes) box.classList.remove('hover');
-
-    let handOverOption = false;
+    let handX = null;
+    let handY = null;
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        statusElement.innerText = "Hold an Open Palm over your answer";
+        // Use the first detected hand for navigation
+        handX = results.multiHandLandmarks[0][9].x * canvasElement.width;
+        handY = results.multiHandLandmarks[0][9].y * canvasElement.height;
+    }
+
+    // Draw Game Elements
+    if (gameActive) {
+        updateExploration(canvasElement.width, canvasElement.height, handX, handY);
+        interactables.forEach(obj => obj.draw(canvasCtx));
+    }
+
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        statusElement.innerText = "Hand Detected";
         for (const [index, landmarks] of results.multiHandLandmarks.entries()) {
             drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
             drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
 
             const gesture = detectGesture(landmarks);
-            if (gesture === 'Open Palm') {
-                // Use palm center (landmark 9) for collision, but flip X coord due to mirroring
-                const handX = (1 - landmarks[9].x) * canvasElement.width;
-                const handY = landmarks[9].y * canvasElement.height;
-                currentPalmPosition = { x: handX, y: handY };
+            
+            // --- Learning Phase ---
+            if (currentLessonIndex < lessons.length) {
+                const lesson = lessons[currentLessonIndex];
+                if (gesture === lesson.gesture) {
+                    // Trigger Effect
+                    const x = landmarks[9].x * canvasElement.width;
+                    const y = landmarks[9].y * canvasElement.height;
+                    triggerSpellEffect(x, y, lesson.id);
 
-                for (let i = 0; i < domBoxes.length; i++) {
-                    const box = domBoxes[i].getBoundingClientRect();
-                    if (handX > box.left && handX < box.right && handY > box.top && handY < box.bottom) {
-                        handOverOption = true;
-                        if (domBoxes[i]) domBoxes[i].classList.add('hover');
-                        if (selectionTimeout === null) {
-                            statusElement.innerText = "Selecting...";
-                            selectionTimeout = setTimeout(() => checkAnswer(i), 1500);
-                        }
-                        break;
+                    if (!spellCooldown) {
+                        spellCooldown = true;
+                        feedbackElement.innerText = "Spell Cast!";
+                        feedbackElement.style.opacity = 1;
+                        
+                        setTimeout(() => {
+                            currentLessonIndex++;
+                            updateLessonUI();
+                            spellCooldown = false;
+                            feedbackElement.style.opacity = 0;
+                        }, 2000);
+                    }
+                }
+            } else {
+                // --- Free Play Mode ---
+                for (const spell of lessons) {
+                    if (gesture === spell.gesture) {
+                        const currentHandX = landmarks[9].x * canvasElement.width;
+                        const currentHandY = landmarks[9].y * canvasElement.height;
+                        
+                        // Interaction Logic
+                        interactables.forEach(obj => {
+                            if (obj.active) return; // Already active
+                            
+                            const scale = Math.max(0.1, (1000 - obj.z) / 1000);
+                            const interactionRadius = 100 * scale; // Interaction radius scales with object size
+                            const dist = Math.hypot(obj.x - currentHandX, obj.y - currentHandY);
+
+                            if (dist < interactionRadius) {
+                                // Check if spell matches object type
+                                if ((spell.id === 'lumos' && obj.type === 'rune') ||
+                                    (spell.id === 'incendio' && obj.type === 'torch') ||
+                                    (spell.id === 'fulgura' && obj.type === 'crystal') ||
+                                    (spell.id === 'celebratio' && obj.type === 'seed')) {
+                                    
+                                    obj.activate();
+                                    triggerSpellEffect(obj.x, obj.y, spell.id);
+                                }
+                            }
+                        });
+                        
+                        // Visual effect for casting
+                        if (Math.random() > 0.8) triggerSpellEffect(currentHandX, currentHandY, spell.id);
+                        break; 
                     }
                 }
             }
@@ -301,12 +392,13 @@ function onResults(results) {
         statusElement.innerText = "Show your hand to the camera";
     }
 
-    if (!handOverOption && selectionTimeout) {
-        clearTimeout(selectionTimeout);
-        selectionTimeout = null;
+    // Update and draw particles
+    for (let i = 0; i < particles.length; i++) {
+        particles[i].update();
+        particles[i].draw(canvasCtx);
     }
-
-    effects.splash(canvasCtx, canvasElement.width, canvasElement.height);
+    // Remove dead particles
+    particles = particles.filter(p => p.life > 0);
 
     canvasCtx.restore();
 }
@@ -332,5 +424,5 @@ const camera = new Camera(videoElement, {
     height: 720
 });
 
-updateTriviaUI();
+updateLessonUI();
 camera.start();

@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Gesture Magic</title>
-    <link rel="stylesheet" href="style.css?v=4">
+    <title>Studio Mesmer's School of Magic</title>
+    <link rel="stylesheet" href="style.css?v=5">
     <!-- MediaPipe Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
@@ -18,59 +18,18 @@
         <canvas class="output_canvas"></canvas>
         <div id="status">Loading AI Model...</div>
 
-        <!-- Trivia UI (managed by script.js) -->
-        <div id="trivia-container">
-            <h2 id="question-text"></h2>
-            <div id="options-container"></div>
+        <!-- Magic School UI -->
+        <div id="magic-ui">
+            <h1 id="spell-name">Welcome</h1>
+            <p id="instruction">Loading Grimoire...</p>
         </div>
+        <div id="feedback"></div>
 
-        <!-- Studio Mesmer Website Content (Hidden initially) -->
-        <div id="website-content" style="display: none;">
-            <nav>
-                <h1>STUDIO MESMER</h1>
-                <ul>
-                    <li>Work</li>
-                    <li onclick="enterGestureLab()">Gesture Lab</li>
-                    <li>About</li>
-                    <li>Contact</li>
-                </ul>
-            </nav>
-            <section class="hero">
-                <h2>Welcome. You've unlocked the experience.</h2>
-                <p>Scroll to explore.</p>
-            </section>
-            <section class="content">
-                <h3>Our Philosophy</h3>
-                <p>At Studio Mesmer, we believe that code is the new canvas. We blend gesture recognition, generative art, and web technologies to create immersive experiences that captivate and inspire.</p>
-                
-                <h3>Selected Works</h3>
-                <div class="project"><h4>Project Alpha</h4><p>Interactive installation for the Modern Art Museum.</p></div>
-                <div class="project"><h4>Project Beta</h4><p>Gesture-controlled lighting system for smart homes.</p></div>
-                <div class="project"><h4>Project Gamma</h4><p>AI-driven generative branding for tech startups.</p></div>
-            </section>
-            <footer>
-                <p>&copy; 2026 Studio Mesmer. Your journey begins now.</p>
-            </footer>
-        </div>
-
-        <!-- Gesture Lab Interface -->
-        <div id="gesture-lab">
-            <div id="lab-hud">
-                <span>✋ Hover to Aim</span>
-                <span>🤏 Pinch to Select</span>
-                <span>✊ Grab to Pan</span>
-                <button onclick="exitGestureLab()">Exit Simulation</button>
-            </div>
-            <div id="lab-viewport">
-                <div class="lab-card" style="background: #ff4757;"><h2>Project Red</h2><p>Neural Interfaces</p></div>
-                <div class="lab-card" style="background: #2ed573;"><h2>Project Green</h2><p>Bio-Digital Synthesis</p></div>
-                <div class="lab-card" style="background: #1e90ff;"><h2>Project Blue</h2><p>Deep Sea Data</p></div>
-                <div class="lab-card" style="background: #ffa502;"><h2>Project Amber</h2><p>Solar Systems</p></div>
-                <div class="lab-card" style="background: #a55eea;"><h2>Project Purple</h2><p>Dream Recording</p></div>
-                <div class="lab-card" style="background: #fc5c65;"><h2>Project Rose</h2><p>Emotion AI</p></div>
-            </div>
+        <!-- Game HUD -->
+        <div id="game-hud">
+            <div id="discoveries">Discoveries: 0</div>
         </div>
     </div>
-    <script src="script.js?v=3"></script>
+    <script src="script.js?v=5"></script>
 </body>
 </html>
