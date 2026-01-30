@@ -45,15 +45,19 @@ body {
 /* --- Magic School UI --- */
 #magic-ui {
     position: absolute;
-    top: 20px;
-    left: 0;
-    width: 100%;
+    top: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    max-width: 1000px;
     text-align: center;
     color: #f1c40f; /* Magical Gold */
     font-family: 'Georgia', serif;
-    pointer-events: none;
     z-index: 20;
     text-shadow: 0 0 10px rgba(0,0,0,0.8);
+    background: rgba(0, 0, 0, 0.2);
+    padding: 15px;
+    border-radius: 20px;
 }
 
 #spell-name {
@@ -88,7 +92,7 @@ body {
 #game-hud {
     display: none;
     position: absolute;
-    top: 20px;
+    top: 80px;
     right: 20px;
     text-align: right;
     color: white;
@@ -99,4 +103,32 @@ body {
 #discoveries {
     font-size: 2rem;
     color: #f1c40f;
+}
+
+#voice-command-btn {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 100;
+    background: rgba(0, 0, 0, 0.5);
+    color: #f1c40f;
+    border: 2px solid #f1c40f;
+    padding: 10px 20px;
+    border-radius: 20px;
+    font-family: 'Georgia', serif;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.3s;
+}
+
+#voice-command-btn:hover {
+    background: #f1c40f;
+    color: #000;
+}
+
+#voice-command-btn.listening {
+    background: #e74c3c;
+    border-color: #e74c3c;
+    color: white;
+    box-shadow: 0 0 10px #e74c3c;
 }

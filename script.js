@@ -7,11 +7,13 @@ const instructionElement = document.getElementById('instruction');
 const feedbackElement = document.getElementById('feedback');
 const gameHudElement = document.getElementById('game-hud');
 const discoveriesElement = document.getElementById('discoveries');
+const voiceCommandBtn = document.getElementById('voice-command-btn');
 
 // State management
 let particles = [];
 let currentLessonIndex = 0;
 let spellCooldown = false;
+let initialHandDetected = false;
 
 // Game State
 let gameActive = false;
@@ -21,22 +23,22 @@ let discoveries = 0;
 const lessons = [
     { 
         id: "lumos",
-        title: "Lumos", 
-        instruction: "Show an Open Palm to summon light.", 
+        title: "Search", 
+        instruction: "Show an Open Palm to reveal hidden secrets.", 
         gesture: "Open Palm",
         color: "255, 255, 255" 
     },
     { 
         id: "incendio",
-        title: "Incendio", 
-        instruction: "Clench a Closed Fist to cast fire.", 
+        title: "Destroy", 
+        instruction: "Clench a Closed Fist to destroy obstacles.", 
         gesture: "Closed Fist",
         color: "255, 69, 0"
     },
     { 
         id: "fulgura",
-        title: "Fulgura", 
-        instruction: "Point your Index Finger to spark lightning.", 
+        title: "Summon", 
+        instruction: "Point your Index Finger to summon power.", 
         gesture: "Index Finger",
         color: "255, 215, 0"
     },
@@ -44,10 +46,97 @@ const lessons = [
         id: "celebratio",
         title: "Celebratio", 
         instruction: "Flash a Victory sign to celebrate!", 
-        gesture: "Victory",
-        color: "random"
+        gesture: "Victory"
     }
 ];
+
+// --- VOICE COMMANDS ---
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (SpeechRecognition) {
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+
+    voiceCommandBtn.onclick = () => {
+        if (voiceCommandBtn.classList.contains('listening')) {
+            recognition.stop();
+        } else {
+            try {
+                recognition.start();
+            } catch (e) {
+                console.warn("Recognition start error:", e);
+            }
+        }
+    };
+
+    recognition.onstart = () => {
+        voiceCommandBtn.classList.add('listening');
+        voiceCommandBtn.innerText = "Listening...";
+    };
+
+    recognition.onend = () => {
+        voiceCommandBtn.classList.remove('listening');
+        voiceCommandBtn.innerText = "Voice Commands";
+    };
+
+    recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript.toLowerCase();
+        
+        let responseText = "";
+
+        if (transcript.includes('hello') || transcript.includes('hi')) {
+            responseText = "Greetings. Try not to smudge the screen with those hands.";
+        } else if (transcript.includes('help')) {
+            responseText = "Open Palm: Search. Fist: Destroy. It's not rocket science.";
+        } else if (transcript.includes('magic')) {
+            responseText = "It's mostly math, but sure, let's call it magic.";
+        } else if (transcript.includes('who are you')) {
+            responseText = "I'm the code running this show. Be nice.";
+        } else if (transcript.includes('spell') || transcript.includes('cast')) {
+            responseText = "You have the hands for it. Just focus.";
+        } else if (transcript.includes('yes') || transcript.includes('no')) {
+            responseText = "Binary choices are so limiting.";
+        } else if (transcript.includes('why')) {
+            responseText = "The universe rarely explains itself.";
+        } else if (transcript.includes('time')) {
+            responseText = "Time is an illusion, especially in here.";
+        } else if (transcript.includes('thank')) {
+            responseText = "You're welcome, mortal.";
+        } else {
+            const snarkyDefaults = [
+                "I have no idea what that means, but it sounded profound.",
+                "The aether is confused by your request.",
+                "Try saying 'Help'. I'm not a mind reader.",
+                "Interesting noise. Do it again?",
+                "The stars are silent on that matter.",
+                "Perhaps. Or perhaps not.",
+                "Your voice ripples through the void.",
+                "I am listening, but I am not obeying.",
+                "Interesting perspective.",
+                "I'll pretend I understood that."
+            ];
+            responseText = snarkyDefaults[Math.floor(Math.random() * snarkyDefaults.length)];
+        }
+
+        instructionElement.innerText = responseText;
+    };
+    
+    recognition.onerror = (event) => {
+        console.error("Speech recognition error", event.error);
+        voiceCommandBtn.classList.remove('listening');
+        voiceCommandBtn.innerText = "Voice Commands";
+        
+        if (event.error === 'network') {
+            instructionElement.innerText = "Network error: Online access required.";
+        } else if (event.error === 'not-allowed') {
+            instructionElement.innerText = "Microphone permission denied.";
+        }
+    };
+} else {
+    voiceCommandBtn.style.display = 'none';
+    console.warn("Web Speech API not supported.");
+}
 
 // --- 1. EFFECT SYSTEM ---
 
@@ -57,7 +146,7 @@ class Interactable {
         this.y = Math.random() * h;
         this.z = Math.random() * 1000; // Depth
         this.size = Math.random() * 20 + 30;
-        // Types correspond to spells: rune->lumos, torch->incendio, crystal->fulgura, seed->celebratio
+        // Types correspond to spells: rune->Search, torch->Destroy, crystal->Summon, seed->Celebratio
         const types = ['rune', 'torch', 'crystal', 'seed'];
         this.type = types[Math.floor(Math.random() * types.length)];
         this.active = false;
@@ -65,11 +154,30 @@ class Interactable {
         this.driftY = (Math.random() - 0.5) * 0.2;
         
         // Initial visual state
-        this.alpha = this.type === 'rune' ? 0.1 : 0.6; // Runes are barely visible
+        this.alpha = this.type === 'rune' ? 0 : 0.6; // Runes are invisible initially
         this.color = '#555';
     }
 
-    update(w, h, handX, handY) {
+    update(w, h, speedX, speedZ, rightHandX, rightHandY, isLumosActive) {
+        // Z movement (Zoom)
+        this.z -= speedZ;
+        if (this.z < 0) {
+            this.z = 1000;
+            this.x = Math.random() * w;
+            this.y = Math.random() * h;
+        }
+        if (this.z > 1000) {
+            this.z = 0;
+            this.x = Math.random() * w;
+            this.y = Math.random() * h;
+        }
+
+        const scale = Math.max(0.1, (1000 - this.z) / 1000);
+
+        // X movement (Pan) - Move objects opposite to camera
+        this.x += speedX * scale; 
+        
+        // Drift
         this.x += this.driftX;
         this.y += this.driftY;
 
@@ -79,13 +187,18 @@ class Interactable {
         if (this.y < -50) this.y = h + 50;
         if (this.y > h + 50) this.y = -50;
 
-        // Parallax effect based on hand position
-        if (handX && handY) {
-            const parallaxFactor = (1000 - this.z) / 1000; // 0 (far) to 1 (close)
-            const offsetX = (handX - w / 2);
-            const offsetY = (handY - h / 2);
-            this.x -= (offsetX / w) * parallaxFactor * 20; // Sensitivity
-            this.y -= (offsetY / h) * parallaxFactor * 20;
+        // Search Mechanic: Reveal Runes with Light
+        if (this.type === 'rune' && !this.active) {
+            this.alpha = 0;
+            if (isLumosActive && rightHandX !== null) {
+                const dist = Math.hypot(this.x - rightHandX, this.y - rightHandY);
+                const revealRadius = 250 * scale; // Radius scales with depth
+                
+                if (dist < revealRadius) {
+                    // Fade in based on distance
+                    this.alpha = Math.min(1, (1 - dist / revealRadius) + 0.1);
+                }
+            }
         }
     }
 
@@ -140,7 +253,7 @@ class Particle {
             this.vx = 0;
             this.vy = 0;
             this.size = Math.random() * 100 + 200; 
-            this.life = 0.2; // Short life, continuous stream
+            this.life = 0.5; // Smoother stream
         } else if (type === 'incendio') {
             this.vx = (Math.random() - 0.5) * 8;
             this.vy = -Math.random() * 8 - 8; // Upwards
@@ -165,7 +278,7 @@ class Particle {
     }
     update() {
         if (this.type === 'lumos') {
-            this.life -= 0.05;
+            this.life -= 0.02;
         } else if (this.type === 'incendio') {
             this.x += this.vx;
             this.y += this.vy;
@@ -263,8 +376,8 @@ function detectGesture(landmarks) {
 function updateLessonUI() {
     if (currentLessonIndex >= lessons.length) {
         spellNameElement.innerText = "The Ethereal Void";
-        instructionElement.innerText = "Explore and awaken the dormant magic.";
-        statusElement.innerText = "Cast spells to interact.";
+        instructionElement.innerText = "Left Hand: Navigate | Right Hand: Cast Spells";
+        statusElement.innerText = "Explore the void.";
         gameActive = true;
         gameHudElement.style.display = 'block';
     } else {
@@ -285,23 +398,48 @@ function triggerSpellEffect(x, y, type) {
     }
 }
 
-function updateExploration(canvasWidth, canvasHeight, handX, handY) {
+function updateExploration(canvasWidth, canvasHeight, leftHand, rightHand) {
     if (!gameActive) return;
 
+    // Calculate Navigation (Left Hand)
+    let speedX = 0;
+    let speedZ = 0;
+    if (leftHand) {
+        const palm = leftHand[9];
+        // X: Pan based on horizontal position (0.5 is center)
+        speedX = (palm.x - 0.5) * 40;
+        // Y: Zoom based on vertical position (Up = Zoom In)
+        speedZ = (0.5 - palm.y) * 40;
+    }
+
+    // Calculate Interaction (Right Hand)
+    let rightHandX = null;
+    let rightHandY = null;
+    let isLumosActive = false;
+    
+    if (rightHand) {
+        rightHandX = rightHand[9].x * canvasWidth;
+        rightHandY = rightHand[9].y * canvasHeight;
+        const gesture = detectGesture(rightHand);
+        isLumosActive = (gesture === 'Open Palm');
+    }
+
     // Initial Spawn
-    if (interactables.length < 25) { // More objects for a denser scene
+    if (interactables.length < 40) { // More objects for a denser scene
         interactables.push(new Interactable(canvasWidth, canvasHeight));
     }
 
-    interactables.forEach(obj => obj.update(canvasWidth, canvasHeight, handX, handY));
+    interactables.forEach(obj => obj.update(canvasWidth, canvasHeight, speedX, speedZ, rightHandX, rightHandY, isLumosActive));
     
     // Sort by depth so we draw far objects first
     interactables.sort((a, b) => a.z - b.z);
 }
 
 function onResults(results) {
-    canvasElement.width = window.innerWidth;
-    canvasElement.height = window.innerHeight;
+    if (canvasElement.width !== window.innerWidth || canvasElement.height !== window.innerHeight) {
+        canvasElement.width = window.innerWidth;
+        canvasElement.height = window.innerHeight;
+    }
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
@@ -309,22 +447,29 @@ function onResults(results) {
     canvasCtx.fillStyle = '#1e1e1e';
     canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
-    let handX = null;
-    let handY = null;
+    let leftHand = null;
+    let rightHand = null;
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        // Use the first detected hand for navigation
-        handX = results.multiHandLandmarks[0][9].x * canvasElement.width;
-        handY = results.multiHandLandmarks[0][9].y * canvasElement.height;
+        for (const [index, landmarks] of results.multiHandLandmarks.entries()) {
+            const label = results.multiHandedness[index].label;
+            if (label === 'Right') leftHand = landmarks;
+            if (label === 'Left') rightHand = landmarks;
+        }
     }
 
     // Draw Game Elements
     if (gameActive) {
-        updateExploration(canvasElement.width, canvasElement.height, handX, handY);
+        updateExploration(canvasElement.width, canvasElement.height, leftHand, rightHand);
         interactables.forEach(obj => obj.draw(canvasCtx));
     }
 
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        statusElement.innerText = "Hand Detected";
+        // Hide status message after first detection to prevent UI overlap
+        if (!initialHandDetected) {
+            statusElement.style.display = 'none';
+            initialHandDetected = true;
+        }
+
         for (const [index, landmarks] of results.multiHandLandmarks.entries()) {
             drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
             drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
@@ -344,22 +489,26 @@ function onResults(results) {
                         spellCooldown = true;
                         feedbackElement.innerText = "Spell Cast!";
                         feedbackElement.style.opacity = 1;
+                        spellNameElement.parentElement.style.display = 'none';
                         
                         setTimeout(() => {
                             currentLessonIndex++;
                             updateLessonUI();
                             spellCooldown = false;
                             feedbackElement.style.opacity = 0;
+                            spellNameElement.parentElement.style.display = 'block';
                         }, 2000);
                     }
                 }
             } else {
                 // --- Free Play Mode ---
+                // Only allow Right Hand to cast spells in Free Play
+                if (landmarks === rightHand) {
                 for (const spell of lessons) {
                     if (gesture === spell.gesture) {
                         const currentHandX = landmarks[9].x * canvasElement.width;
                         const currentHandY = landmarks[9].y * canvasElement.height;
-                        
+
                         // Interaction Logic
                         interactables.forEach(obj => {
                             if (obj.active) return; // Already active
@@ -382,14 +531,19 @@ function onResults(results) {
                         });
                         
                         // Visual effect for casting
-                        if (Math.random() > 0.8) triggerSpellEffect(currentHandX, currentHandY, spell.id);
+                        triggerSpellEffect(currentHandX, currentHandY, spell.id);
                         break; 
                     }
+                }
                 }
             }
         }
     } else {
-        statusElement.innerText = "Show your hand to the camera";
+        // If hand is lost after initial detection, show a prompt
+        if (initialHandDetected) {
+            statusElement.style.display = 'block';
+            statusElement.innerText = "Show your hand to the camera";
+        }
     }
 
     // Update and draw particles
