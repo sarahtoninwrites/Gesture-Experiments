@@ -74,6 +74,13 @@ body {
     font-style: italic;
 }
 
+#assistant-response {
+    font-size: 1.8rem;
+    color: #81ecec; /* A distinct mystical blue */
+    margin-top: 15px;
+    min-height: 30px;
+}
+
 #feedback {
     position: absolute;
     bottom: 50px;

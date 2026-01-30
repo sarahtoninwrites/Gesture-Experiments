@@ -4,6 +4,7 @@ const canvasCtx = canvasElement.getContext('2d');
 const statusElement = document.getElementById('status');
 const spellNameElement = document.getElementById('spell-name');
 const instructionElement = document.getElementById('instruction');
+const assistantResponseElement = document.getElementById('assistant-response');
 const feedbackElement = document.getElementById('feedback');
 const gameHudElement = document.getElementById('game-hud');
 const discoveriesElement = document.getElementById('discoveries');
@@ -73,6 +74,7 @@ if (SpeechRecognition) {
     recognition.onstart = () => {
         voiceCommandBtn.classList.add('listening');
         voiceCommandBtn.innerText = "Listening...";
+        assistantResponseElement.innerText = "...";
     };
 
     recognition.onend = () => {
@@ -119,7 +121,7 @@ if (SpeechRecognition) {
             responseText = snarkyDefaults[Math.floor(Math.random() * snarkyDefaults.length)];
         }
 
-        instructionElement.innerText = responseText;
+        assistantResponseElement.innerText = responseText;
     };
     
     recognition.onerror = (event) => {
@@ -128,9 +130,9 @@ if (SpeechRecognition) {
         voiceCommandBtn.innerText = "Voice Commands";
         
         if (event.error === 'network') {
-            instructionElement.innerText = "Network error: Online access required.";
+            assistantResponseElement.innerText = "Network error: Online access required.";
         } else if (event.error === 'not-allowed') {
-            instructionElement.innerText = "Microphone permission denied.";
+            assistantResponseElement.innerText = "Microphone permission denied.";
         }
     };
 } else {
