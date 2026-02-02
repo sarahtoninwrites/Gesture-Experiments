@@ -4,7 +4,6 @@ const canvasCtx = canvasElement.getContext('2d');
 const statusElement = document.getElementById('status');
 const spellNameElement = document.getElementById('spell-name');
 const instructionElement = document.getElementById('instruction');
-const assistantResponseElement = document.getElementById('assistant-response');
 const feedbackElement = document.getElementById('feedback');
 const gameHudElement = document.getElementById('game-hud');
 const discoveriesElement = document.getElementById('discoveries');
@@ -13,8 +12,11 @@ const voiceCommandBtn = document.getElementById('voice-command-btn');
 // State management
 let particles = [];
 let currentLessonIndex = 0;
-let spellCooldown = false;
 let initialHandDetected = false;
+
+let currentRightHandGesture = null;
+let currentRightHandPos = null;
+let activeSpellId = null;
 
 // Game State
 let gameActive = false;
@@ -25,29 +27,23 @@ const lessons = [
     { 
         id: "lumos",
         title: "Search", 
-        instruction: "Show an Open Palm to reveal hidden secrets.", 
+        instruction: "Hold Open Palm and say 'Lumos'.", 
         gesture: "Open Palm",
         color: "255, 255, 255" 
     },
     { 
-        id: "incendio",
+        id: "inferno",
         title: "Destroy", 
-        instruction: "Clench a Closed Fist to destroy obstacles.", 
+        instruction: "Hold Fist and say 'Inferno'.", 
         gesture: "Closed Fist",
         color: "255, 69, 0"
     },
     { 
-        id: "fulgura",
+        id: "bolto",
         title: "Summon", 
-        instruction: "Point your Index Finger to summon power.", 
+        instruction: "Point Finger and say 'Bolto'.", 
         gesture: "Index Finger",
         color: "255, 215, 0"
-    },
-    { 
-        id: "celebratio",
-        title: "Celebratio", 
-        instruction: "Flash a Victory sign to celebrate!", 
-        gesture: "Victory"
     }
 ];
 
@@ -55,89 +51,108 @@ const lessons = [
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 if (SpeechRecognition) {
     const recognition = new SpeechRecognition();
-    recognition.continuous = false;
+    recognition.continuous = true; // Listen throughout
     recognition.lang = 'en-US';
     recognition.interimResults = false;
 
     voiceCommandBtn.onclick = () => {
-        if (voiceCommandBtn.classList.contains('listening')) {
-            recognition.stop();
-        } else {
-            try {
-                recognition.start();
-            } catch (e) {
-                console.warn("Recognition start error:", e);
-            }
+        try {
+            recognition.start();
+            voiceCommandBtn.innerText = "Listening...";
+            voiceCommandBtn.classList.add('listening');
+        } catch (e) {
+            console.warn("Recognition already active");
         }
-    };
-
-    recognition.onstart = () => {
-        voiceCommandBtn.classList.add('listening');
-        voiceCommandBtn.innerText = "Listening...";
-        assistantResponseElement.innerText = "...";
-    };
-
-    recognition.onend = () => {
-        voiceCommandBtn.classList.remove('listening');
-        voiceCommandBtn.innerText = "Voice Commands";
     };
 
     recognition.onresult = (event) => {
-        const transcript = event.results[0][0].transcript.toLowerCase();
-        
-        let responseText = "";
+        // Get the latest result
+        const transcript = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
+        console.log("Heard:", transcript);
+        checkCombo(transcript);
+    };
 
-        if (transcript.includes('hello') || transcript.includes('hi')) {
-            responseText = "Greetings. Try not to smudge the screen with those hands.";
-        } else if (transcript.includes('help')) {
-            responseText = "Open Palm: Search. Fist: Destroy. It's not rocket science.";
-        } else if (transcript.includes('magic')) {
-            responseText = "It's mostly math, but sure, let's call it magic.";
-        } else if (transcript.includes('who are you')) {
-            responseText = "I'm the code running this show. Be nice.";
-        } else if (transcript.includes('spell') || transcript.includes('cast')) {
-            responseText = "You have the hands for it. Just focus.";
-        } else if (transcript.includes('yes') || transcript.includes('no')) {
-            responseText = "Binary choices are so limiting.";
-        } else if (transcript.includes('why')) {
-            responseText = "The universe rarely explains itself.";
-        } else if (transcript.includes('time')) {
-            responseText = "Time is an illusion, especially in here.";
-        } else if (transcript.includes('thank')) {
-            responseText = "You're welcome, mortal.";
-        } else {
-            const snarkyDefaults = [
-                "I have no idea what that means, but it sounded profound.",
-                "The aether is confused by your request.",
-                "Try saying 'Help'. I'm not a mind reader.",
-                "Interesting noise. Do it again?",
-                "The stars are silent on that matter.",
-                "Perhaps. Or perhaps not.",
-                "Your voice ripples through the void.",
-                "I am listening, but I am not obeying.",
-                "Interesting perspective.",
-                "I'll pretend I understood that."
-            ];
-            responseText = snarkyDefaults[Math.floor(Math.random() * snarkyDefaults.length)];
+    recognition.onend = () => {
+        // Auto-restart to "listen throughout" if the game is still running
+        if (voiceCommandBtn.classList.contains('listening')) {
+            try { recognition.start(); } catch (e) {}
         }
-
-        assistantResponseElement.innerText = responseText;
     };
     
     recognition.onerror = (event) => {
         console.error("Speech recognition error", event.error);
-        voiceCommandBtn.classList.remove('listening');
-        voiceCommandBtn.innerText = "Voice Commands";
-        
-        if (event.error === 'network') {
-            assistantResponseElement.innerText = "Network error: Online access required.";
-        } else if (event.error === 'not-allowed') {
-            assistantResponseElement.innerText = "Microphone permission denied.";
+        // Stop the loop on fatal errors
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+             voiceCommandBtn.classList.remove('listening');
+             voiceCommandBtn.innerText = "Enable Voice Magic";
         }
     };
 } else {
     voiceCommandBtn.style.display = 'none';
     console.warn("Web Speech API not supported.");
+}
+
+function checkCombo(voiceCommand) {
+    if (!currentRightHandGesture) return;
+
+    // Map voice commands to spell IDs
+    let spellId = null;
+    if (voiceCommand.includes('lumos') || voiceCommand.includes('light') || voiceCommand.includes('search')) spellId = 'lumos';
+    else if (voiceCommand.includes('inferno') || voiceCommand.includes('fire') || voiceCommand.includes('burn')) spellId = 'inferno';
+    else if (voiceCommand.includes('bolto') || voiceCommand.includes('bolt') || voiceCommand.includes('spark')) spellId = 'bolto';
+
+    if (spellId) {
+        // Find the required gesture for this spell
+        const lesson = lessons.find(l => l.id === spellId);
+        
+        // CHECK COMBO: Voice matches Spell AND Gesture matches Spell
+        if (lesson && currentRightHandGesture === lesson.gesture) {
+            castSpell(spellId);
+        } else {
+            feedbackElement.innerText = "Gesture mismatch!";
+            feedbackElement.style.opacity = 1;
+            setTimeout(() => feedbackElement.style.opacity = 0, 1000);
+        }
+    }
+}
+
+function castSpell(spellId) {
+    // Activate the spell for channeling
+    activeSpellId = spellId;
+
+    // Logic: Learning Phase
+    if (currentLessonIndex < lessons.length) {
+        if (lessons[currentLessonIndex].id === spellId) {
+            feedbackElement.innerText = "Perfect!";
+            feedbackElement.style.opacity = 1;
+            spellNameElement.parentElement.style.display = 'none';
+            
+            // Lesson advancement is now handled when the gesture is released.
+        }
+    } 
+    // Logic: Free Play
+    else if (gameActive) {
+        // Interact with objects
+        interactables.forEach(obj => {
+            if (obj.active) return;
+            
+            // Distance check using the cached hand position
+            const scale = Math.max(0.1, (1000 - obj.z) / 1000);
+            const interactionRadius = 150 * scale; 
+            const dist = Math.hypot(obj.x - currentRightHandPos.x, obj.y - currentRightHandPos.y);
+
+            if (dist < interactionRadius) {
+                if ((spellId === 'lumos' && obj.type === 'rune') ||
+                    (spellId === 'inferno' && obj.type === 'torch') ||
+                    (spellId === 'bolto' && obj.type === 'crystal')) {
+                    
+                    obj.activate();
+                    // Extra effect on the object
+                    triggerSpellEffect(obj.x, obj.y, spellId);
+                }
+            }
+        });
+    }
 }
 
 // --- 1. EFFECT SYSTEM ---
@@ -148,8 +163,8 @@ class Interactable {
         this.y = Math.random() * h;
         this.z = Math.random() * 1000; // Depth
         this.size = Math.random() * 20 + 30;
-        // Types correspond to spells: rune->Search, torch->Destroy, crystal->Summon, seed->Celebratio
-        const types = ['rune', 'torch', 'crystal', 'seed'];
+        // Types correspond to spells: rune->Search, torch->Destroy, crystal->Summon
+        const types = ['rune', 'torch', 'crystal'];
         this.type = types[Math.floor(Math.random() * types.length)];
         this.active = false;
         this.driftX = (Math.random() - 0.5) * 0.2; // Slower drift
@@ -235,10 +250,6 @@ class Interactable {
             ctx.lineTo(this.x, this.y + size);
             ctx.lineTo(this.x - size * 0.75, this.y);
             ctx.fill();
-        } else if (this.type === 'seed') {
-            ctx.fillStyle = this.active ? '#e91e63' : '#2ecc71';
-            ctx.arc(this.x, this.y, (this.active ? 25 : 10) * scale, 0, Math.PI * 2);
-            ctx.fill();
         }
         ctx.restore();
     }
@@ -256,11 +267,11 @@ class Particle {
             this.vy = 0;
             this.size = Math.random() * 100 + 200; 
             this.life = 0.5; // Smoother stream
-        } else if (type === 'incendio') {
+        } else if (type === 'inferno') {
             this.vx = (Math.random() - 0.5) * 8;
             this.vy = -Math.random() * 8 - 8; // Upwards
             this.size = Math.random() * 50 + 40;
-        } else if (type === 'fulgura') {
+        } else if (type === 'bolto') {
             // Lightning bolts path relative to origin
             this.path = [{x: 0, y: 0}]; 
             let cx = 0, cy = 0;
@@ -270,29 +281,18 @@ class Particle {
                 this.path.push({x: cx, y: cy});
             }
             this.life = 0.4;
-        } else if (type === 'celebratio') {
-            this.vx = (Math.random() - 0.5) * 15;
-            this.vy = (Math.random() - 0.5) * 15;
-            this.size = Math.random() * 20 + 15;
-            this.color = `hsl(${Math.random() * 360}, 100%, 50%)`;
-            this.gravity = 0.8;
         }
     }
     update() {
         if (this.type === 'lumos') {
             this.life -= 0.02;
-        } else if (this.type === 'incendio') {
+        } else if (this.type === 'inferno') {
             this.x += this.vx;
             this.y += this.vy;
             this.size *= 0.92;
             this.life -= 0.03;
-        } else if (this.type === 'fulgura') {
+        } else if (this.type === 'bolto') {
             this.life -= 0.1;
-        } else if (this.type === 'celebratio') {
-            this.x += this.vx;
-            this.y += this.vy;
-            this.vy += this.gravity;
-            this.life -= 0.01;
         }
     }
     draw(ctx) {
@@ -308,12 +308,12 @@ class Particle {
             ctx.beginPath();
             ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
             ctx.fill();
-        } else if (this.type === 'incendio') {
+        } else if (this.type === 'inferno') {
             ctx.fillStyle = `rgba(255, ${Math.floor(this.life * 200)}, 0, ${this.life})`;
             ctx.beginPath();
             ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
             ctx.fill();
-        } else if (this.type === 'fulgura') {
+        } else if (this.type === 'bolto') {
             // Outer Glow
             ctx.strokeStyle = `rgba(175, 238, 238, ${this.life * 0.5})`;
             ctx.lineWidth = 20;
@@ -332,9 +332,6 @@ class Particle {
             ctx.shadowBlur = 20;
             ctx.shadowColor = '#fff';
             ctx.stroke(); // Redraw the same path with different styles
-        } else if (this.type === 'celebratio') {
-            ctx.fillStyle = this.color;
-            ctx.fillRect(this.x, this.y, this.size, this.size);
         }
 
         ctx.restore();
@@ -367,7 +364,6 @@ function detectGesture(landmarks) {
 
     if (fingersUpCount >= 4) return "Open Palm";
     if (fingersUpCount === 0) return "Closed Fist";
-    if (indexUp && middleUp && !ringUp && !pinkyUp) return "Victory";
     if (indexUp && !middleUp && !ringUp && !pinkyUp) return "Index Finger";
     
     return "Unknown";
@@ -378,7 +374,7 @@ function detectGesture(landmarks) {
 function updateLessonUI() {
     if (currentLessonIndex >= lessons.length) {
         spellNameElement.innerText = "The Ethereal Void";
-        instructionElement.innerText = "Left Hand: Navigate | Right Hand: Cast Spells";
+        instructionElement.innerText = "Navigate (Left) | Combo: Gesture + Voice (Right)";
         statusElement.innerText = "Explore the void.";
         gameActive = true;
         gameHudElement.style.display = 'block';
@@ -391,9 +387,8 @@ function updateLessonUI() {
 
 function triggerSpellEffect(x, y, type) {
     let count = 3;
-    if (type === 'incendio') count = 15;
-    if (type === 'fulgura') count = 3;
-    if (type === 'celebratio') count = 50;
+    if (type === 'inferno') count = 15;
+    if (type === 'bolto') count = 3;
 
     for (let i = 0; i < count; i++) {
         particles.push(new Particle(x, y, type));
@@ -417,13 +412,11 @@ function updateExploration(canvasWidth, canvasHeight, leftHand, rightHand) {
     // Calculate Interaction (Right Hand)
     let rightHandX = null;
     let rightHandY = null;
-    let isLumosActive = false;
+    const isLumosActive = (activeSpellId === 'lumos');
     
     if (rightHand) {
         rightHandX = rightHand[9].x * canvasWidth;
         rightHandY = rightHand[9].y * canvasHeight;
-        const gesture = detectGesture(rightHand);
-        isLumosActive = (gesture === 'Open Palm');
     }
 
     // Initial Spawn
@@ -451,6 +444,10 @@ function onResults(results) {
 
     let leftHand = null;
     let rightHand = null;
+    
+    // Reset per frame
+    currentRightHandGesture = null;
+
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
         for (const [index, landmarks] of results.multiHandLandmarks.entries()) {
             const label = results.multiHandedness[index].label;
@@ -461,7 +458,7 @@ function onResults(results) {
 
     // Draw Game Elements
     if (gameActive) {
-        updateExploration(canvasElement.width, canvasElement.height, leftHand, rightHand);
+        updateExploration(canvasElement.width, canvasElement.height, leftHand, rightHand, activeSpellId);
         interactables.forEach(obj => obj.draw(canvasCtx));
     }
 
@@ -476,75 +473,41 @@ function onResults(results) {
             drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
             drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
 
-            const gesture = detectGesture(landmarks);
-            
-            // --- Learning Phase ---
-            if (currentLessonIndex < lessons.length) {
-                const lesson = lessons[currentLessonIndex];
-                if (gesture === lesson.gesture) {
-                    // Trigger Effect
-                    const x = landmarks[9].x * canvasElement.width;
-                    const y = landmarks[9].y * canvasElement.height;
-                    triggerSpellEffect(x, y, lesson.id);
-
-                    if (!spellCooldown) {
-                        spellCooldown = true;
-                        feedbackElement.innerText = "Spell Cast!";
-                        feedbackElement.style.opacity = 1;
-                        spellNameElement.parentElement.style.display = 'none';
-                        
-                        setTimeout(() => {
-                            currentLessonIndex++;
-                            updateLessonUI();
-                            spellCooldown = false;
-                            feedbackElement.style.opacity = 0;
-                            spellNameElement.parentElement.style.display = 'block';
-                        }, 2000);
-                    }
-                }
-            } else {
-                // --- Free Play Mode ---
-                // Only allow Right Hand to cast spells in Free Play
-                if (landmarks === rightHand) {
-                for (const spell of lessons) {
-                    if (gesture === spell.gesture) {
-                        const currentHandX = landmarks[9].x * canvasElement.width;
-                        const currentHandY = landmarks[9].y * canvasElement.height;
-
-                        // Interaction Logic
-                        interactables.forEach(obj => {
-                            if (obj.active) return; // Already active
-                            
-                            const scale = Math.max(0.1, (1000 - obj.z) / 1000);
-                            const interactionRadius = 100 * scale; // Interaction radius scales with object size
-                            const dist = Math.hypot(obj.x - currentHandX, obj.y - currentHandY);
-
-                            if (dist < interactionRadius) {
-                                // Check if spell matches object type
-                                if ((spell.id === 'lumos' && obj.type === 'rune') ||
-                                    (spell.id === 'incendio' && obj.type === 'torch') ||
-                                    (spell.id === 'fulgura' && obj.type === 'crystal') ||
-                                    (spell.id === 'celebratio' && obj.type === 'seed')) {
-                                    
-                                    obj.activate();
-                                    triggerSpellEffect(obj.x, obj.y, spell.id);
-                                }
-                            }
-                        });
-                        
-                        // Visual effect for casting
-                        triggerSpellEffect(currentHandX, currentHandY, spell.id);
-                        break; 
-                    }
-                }
-                }
+            // Update Global State for Combo System
+            if (landmarks === rightHand || (results.multiHandLandmarks.length === 1)) {
+                // If only one hand, assume it's the casting hand for simplicity in learning mode
+                currentRightHandGesture = detectGesture(landmarks);
+                currentRightHandPos = {
+                    x: landmarks[9].x * canvasElement.width,
+                    y: landmarks[9].y * canvasElement.height
+                };
             }
         }
-    } else {
-        // If hand is lost after initial detection, show a prompt
-        if (initialHandDetected) {
-            statusElement.style.display = 'block';
-            statusElement.innerText = "Show your hand to the camera";
+    }
+
+    // --- NEW SPELL HOLDING LOGIC ---
+    if (activeSpellId) {
+        const spell = lessons.find(l => l.id === activeSpellId);
+        // Check if we are still holding the correct gesture
+        if (spell && currentRightHandGesture === spell.gesture) {
+            // Spell is active, keep casting the effect
+            if (currentRightHandPos) {
+                triggerSpellEffect(currentRightHandPos.x, currentRightHandPos.y, activeSpellId);
+            }
+        } else {
+            // Gesture has changed or hand is lost, release the spell.
+            
+            // If we were learning this spell, advance to the next lesson.
+            if (currentLessonIndex < lessons.length && lessons[currentLessonIndex].id === activeSpellId) {
+                currentLessonIndex++;
+                updateLessonUI();
+            }
+
+            activeSpellId = null; // Stop the spell
+            feedbackElement.style.opacity = 0; // Hide feedback
+            if (currentLessonIndex < lessons.length) {
+                 spellNameElement.parentElement.style.display = 'block';
+            }
         }
     }
 
