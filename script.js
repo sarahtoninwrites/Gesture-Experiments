@@ -48,6 +48,59 @@ const lessons = [
     }
 ];
 
+// --- CONVERSATIONAL AI ---
+let voices = [];
+
+if ('speechSynthesis' in window) {
+    const loadVoices = () => {
+        voices = window.speechSynthesis.getVoices();
+    };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+}
+
+const conversationPatterns = [
+    { regex: /\b(hi|hello|hey|greetings)\b/i, responses: ["Greetings, traveler.", "The void whispers back.", "Hello. Don't touch the glass."] },
+    { regex: /who are you/i, responses: ["I am the Aether.", "I am the code that binds this world.", "A voice in the dark."] },
+    { regex: /what is this/i, responses: ["This is the Ethereal Void.", "A canvas for your will.", "A digital dream."] },
+    { regex: /how (.*)/i, responses: ["By focusing your will.", "Magic is not about 'how', but 'why'.", "With your hands, obviously."] },
+    { regex: /i am (.*)/i, responses: ["Why are you $1?", "In this void, you are whatever you choose to be.", "Is being $1 important to you?"] },
+    { regex: /can you (.*)/i, responses: ["I am the system. I can do anything I am programmed for.", "Perhaps. Can you $1?"] },
+    { regex: /why (.*)/i, responses: ["The universe rarely explains itself.", "Why do you ask?", "Some mysteries are better left unsolved."] },
+    { regex: /thank/i, responses: ["You are welcome.", "The Aether acknowledges your gratitude."] },
+    { regex: /spell|cast|magic/i, responses: ["Focus your intent.", "The magic is in your hands.", "Words and gestures, bound together."] },
+    { regex: /help/i, responses: ["Open Palm: Search. Fist: Destroy. It's not rocket science."] },
+    { regex: /.*/, responses: ["The stars are silent on that matter.", "Interesting.", "Your voice ripples through the void.", "I am listening.", "Tell me more.", "Is that so?", "I have no idea what that means, but it sounded profound."]}
+];
+
+function getIntelligentResponse(text) {
+    for (const pattern of conversationPatterns) {
+        const match = text.match(pattern.regex);
+        if (match) {
+            const response = pattern.responses[Math.floor(Math.random() * pattern.responses.length)];
+            return response.replace('$1', match[1] || '');
+        }
+    }
+    return "...";
+}
+
+function speakResponse(text) {
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel(); // Stop any current speech
+        const utterance = new SpeechSynthesisUtterance(text);
+        
+        // Try to select a better voice
+        const preferredVoice = voices.find(v => v.name.includes("Natural")) || 
+                               voices.find(v => v.name.includes("Google US English")) || 
+                               voices.find(v => v.lang === 'en-US');
+        if (preferredVoice) utterance.voice = preferredVoice;
+
+        utterance.pitch = 0.9; // Slightly deeper
+        utterance.rate = 0.95;  // Slightly more deliberate
+        window.speechSynthesis.speak(utterance);
+    }
+}
+
 // --- VOICE COMMANDS ---
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 if (SpeechRecognition) {
@@ -72,48 +125,18 @@ if (SpeechRecognition) {
         console.log("Heard:", transcript);
         checkCombo(transcript);
 
-        // Conversational Logic
-        let responseText = "";
-        if (transcript.includes('hello') || transcript.includes('hi')) {
-            responseText = "Greetings. Try not to smudge the screen with those hands.";
-        } else if (transcript.includes('help')) {
-            responseText = "Open Palm: Search. Fist: Destroy. It's not rocket science.";
-        } else if (transcript.includes('magic')) {
-            responseText = "It's mostly math, but sure, let's call it magic.";
-        } else if (transcript.includes('who are you')) {
-            responseText = "I'm the code running this show. Be nice.";
-        } else if (transcript.includes('spell') || transcript.includes('cast')) {
-            responseText = "You have the hands for it. Just focus.";
-        } else if (transcript.includes('yes') || transcript.includes('no')) {
-            responseText = "Binary choices are so limiting.";
-        } else if (transcript.includes('why')) {
-            responseText = "The universe rarely explains itself.";
-        } else if (transcript.includes('time')) {
-            responseText = "Time is an illusion, especially in here.";
-        } else if (transcript.includes('thank')) {
-            responseText = "You're welcome, mortal.";
-        } else {
-             const isSpell = transcript.includes('lumos') || transcript.includes('light') || transcript.includes('search') ||
-                            transcript.includes('inferno') || transcript.includes('fire') || transcript.includes('burn') ||
-                            transcript.includes('bolto') || transcript.includes('bolt') || transcript.includes('spark');
-            
-            if (!isSpell) {
-                const snarkyDefaults = [
-                    "I have no idea what that means, but it sounded profound.",
-                    "The aether is confused by your request.",
-                    "Try saying 'Help'. I'm not a mind reader.",
-                    "Interesting noise. Do it again?",
-                    "The stars are silent on that matter.",
-                    "Perhaps. Or perhaps not.",
-                    "Your voice ripples through the void."
-                ];
-                responseText = snarkyDefaults[Math.floor(Math.random() * snarkyDefaults.length)];
+        // Check if it was a spell cast (we don't want to chat if they are casting)
+        const isSpell = transcript.includes('lumos') || transcript.includes('light') || transcript.includes('search') ||
+                        transcript.includes('inferno') || transcript.includes('fire') || transcript.includes('burn') ||
+                        transcript.includes('bolto') || transcript.includes('bolt') || transcript.includes('spark');
+        
+        if (!isSpell) {
+            const responseText = getIntelligentResponse(transcript);
+            if (responseText && assistantResponseElement) {
+                assistantResponseElement.innerText = responseText;
+                speakResponse(responseText);
+                setTimeout(() => { if(assistantResponseElement.innerText === responseText) assistantResponseElement.innerText = ""; }, 5000);
             }
-        }
-
-        if (responseText && assistantResponseElement) {
-            assistantResponseElement.innerText = responseText;
-            setTimeout(() => { if(assistantResponseElement.innerText === responseText) assistantResponseElement.innerText = ""; }, 5000);
         }
     };
 
