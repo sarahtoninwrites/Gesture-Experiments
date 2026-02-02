@@ -4,6 +4,7 @@ const canvasCtx = canvasElement.getContext('2d');
 const statusElement = document.getElementById('status');
 const spellNameElement = document.getElementById('spell-name');
 const instructionElement = document.getElementById('instruction');
+const assistantResponseElement = document.getElementById('assistant-response');
 const feedbackElement = document.getElementById('feedback');
 const gameHudElement = document.getElementById('game-hud');
 const discoveriesElement = document.getElementById('discoveries');
@@ -70,6 +71,50 @@ if (SpeechRecognition) {
         const transcript = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
         console.log("Heard:", transcript);
         checkCombo(transcript);
+
+        // Conversational Logic
+        let responseText = "";
+        if (transcript.includes('hello') || transcript.includes('hi')) {
+            responseText = "Greetings. Try not to smudge the screen with those hands.";
+        } else if (transcript.includes('help')) {
+            responseText = "Open Palm: Search. Fist: Destroy. It's not rocket science.";
+        } else if (transcript.includes('magic')) {
+            responseText = "It's mostly math, but sure, let's call it magic.";
+        } else if (transcript.includes('who are you')) {
+            responseText = "I'm the code running this show. Be nice.";
+        } else if (transcript.includes('spell') || transcript.includes('cast')) {
+            responseText = "You have the hands for it. Just focus.";
+        } else if (transcript.includes('yes') || transcript.includes('no')) {
+            responseText = "Binary choices are so limiting.";
+        } else if (transcript.includes('why')) {
+            responseText = "The universe rarely explains itself.";
+        } else if (transcript.includes('time')) {
+            responseText = "Time is an illusion, especially in here.";
+        } else if (transcript.includes('thank')) {
+            responseText = "You're welcome, mortal.";
+        } else {
+             const isSpell = transcript.includes('lumos') || transcript.includes('light') || transcript.includes('search') ||
+                            transcript.includes('inferno') || transcript.includes('fire') || transcript.includes('burn') ||
+                            transcript.includes('bolto') || transcript.includes('bolt') || transcript.includes('spark');
+            
+            if (!isSpell) {
+                const snarkyDefaults = [
+                    "I have no idea what that means, but it sounded profound.",
+                    "The aether is confused by your request.",
+                    "Try saying 'Help'. I'm not a mind reader.",
+                    "Interesting noise. Do it again?",
+                    "The stars are silent on that matter.",
+                    "Perhaps. Or perhaps not.",
+                    "Your voice ripples through the void."
+                ];
+                responseText = snarkyDefaults[Math.floor(Math.random() * snarkyDefaults.length)];
+            }
+        }
+
+        if (responseText && assistantResponseElement) {
+            assistantResponseElement.innerText = responseText;
+            setTimeout(() => { if(assistantResponseElement.innerText === responseText) assistantResponseElement.innerText = ""; }, 5000);
+        }
     };
 
     recognition.onend = () => {
@@ -109,7 +154,7 @@ function checkCombo(voiceCommand) {
         if (lesson && currentRightHandGesture === lesson.gesture) {
             castSpell(spellId);
         } else {
-            feedbackElement.innerText = "Gesture mismatch!";
+            feedbackElement.innerText = "Wrong move buddy";
             feedbackElement.style.opacity = 1;
             setTimeout(() => feedbackElement.style.opacity = 0, 1000);
         }
@@ -117,13 +162,11 @@ function checkCombo(voiceCommand) {
 }
 
 function castSpell(spellId) {
-    // Activate the spell for channeling
     activeSpellId = spellId;
-
     // Logic: Learning Phase
     if (currentLessonIndex < lessons.length) {
         if (lessons[currentLessonIndex].id === spellId) {
-            feedbackElement.innerText = "Perfect!";
+            feedbackElement.innerText = "Perfect Combo!";
             feedbackElement.style.opacity = 1;
             spellNameElement.parentElement.style.display = 'none';
             
@@ -142,8 +185,7 @@ function castSpell(spellId) {
             const dist = Math.hypot(obj.x - currentRightHandPos.x, obj.y - currentRightHandPos.y);
 
             if (dist < interactionRadius) {
-                if ((spellId === 'lumos' && obj.type === 'rune') ||
-                    (spellId === 'inferno' && obj.type === 'torch') ||
+                if ((spellId === 'inferno' && obj.type === 'torch') ||
                     (spellId === 'bolto' && obj.type === 'crystal')) {
                     
                     obj.activate();
@@ -505,9 +547,13 @@ function onResults(results) {
 
             activeSpellId = null; // Stop the spell
             feedbackElement.style.opacity = 0; // Hide feedback
-            if (currentLessonIndex < lessons.length) {
-                 spellNameElement.parentElement.style.display = 'block';
-            }
+            spellNameElement.parentElement.style.display = 'block';
+        }
+    } else {
+        // If hand is lost after initial detection, show a prompt
+        if (initialHandDetected) {
+            statusElement.style.display = 'block';
+            statusElement.innerText = "Show your hand to the camera";
         }
     }
 
