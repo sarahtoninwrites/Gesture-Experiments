@@ -49,6 +49,7 @@ const lessons = [
 ];
 
 // --- CONVERSATIONAL AI ---
+let conversationContext = null;
 let voices = [];
 
 if ('speechSynthesis' in window) {
@@ -60,23 +61,34 @@ if ('speechSynthesis' in window) {
 }
 
 const conversationPatterns = [
-    { regex: /\b(hi|hello|hey|greetings)\b/i, responses: ["Greetings, traveler.", "The void whispers back.", "Hello. Don't touch the glass."] },
-    { regex: /who are you/i, responses: ["I am the Aether.", "I am the code that binds this world.", "A voice in the dark."] },
-    { regex: /what is this/i, responses: ["This is the Ethereal Void.", "A canvas for your will.", "A digital dream."] },
+    // Context-aware follow-ups
+    { regex: /why/i, requiredContext: 'identity', responses: ["Because I was written into existence.", "To guide you through the void."] },
+    { regex: /how/i, requiredContext: 'magic', responses: ["It is a blend of technology and intent.", "Through the camera and your gestures."] },
+
+    { regex: /\b(hi|hello|hey|greetings)\b/i, setContext: 'greeting', responses: ["Greetings, traveler.", "The void whispers back.", "Hello. Don't touch the glass."] },
+    { regex: /who are you/i, setContext: 'identity', responses: ["I am the Aether.", "I am the code that binds this world.", "A voice in the dark."] },
+    { regex: /what is this/i, setContext: 'world', responses: ["This is the Ethereal Void.", "A canvas for your will.", "A digital dream."] },
     { regex: /how (.*)/i, responses: ["By focusing your will.", "Magic is not about 'how', but 'why'.", "With your hands, obviously."] },
     { regex: /i am (.*)/i, responses: ["Why are you $1?", "In this void, you are whatever you choose to be.", "Is being $1 important to you?"] },
     { regex: /can you (.*)/i, responses: ["I am the system. I can do anything I am programmed for.", "Perhaps. Can you $1?"] },
-    { regex: /why (.*)/i, responses: ["The universe rarely explains itself.", "Why do you ask?", "Some mysteries are better left unsolved."] },
-    { regex: /thank/i, responses: ["You are welcome.", "The Aether acknowledges your gratitude."] },
-    { regex: /spell|cast|magic/i, responses: ["Focus your intent.", "The magic is in your hands.", "Words and gestures, bound together."] },
+    { regex: /thank/i, setContext: 'polite', responses: ["You are welcome.", "The Aether acknowledges your gratitude."] },
+    { regex: /spell|cast|magic/i, setContext: 'magic', responses: ["Focus your intent.", "The magic is in your hands.", "Words and gestures, bound together."] },
     { regex: /help/i, responses: ["Open Palm: Search. Fist: Destroy. It's not rocket science."] },
     { regex: /.*/, responses: ["The stars are silent on that matter.", "Interesting.", "Your voice ripples through the void.", "I am listening.", "Tell me more.", "Is that so?", "I have no idea what that means, but it sounded profound."]}
 ];
 
 function getIntelligentResponse(text) {
     for (const pattern of conversationPatterns) {
+        // Check context if required
+        if (pattern.requiredContext && pattern.requiredContext !== conversationContext) {
+            continue;
+        }
+
         const match = text.match(pattern.regex);
         if (match) {
+            if (pattern.setContext) {
+                conversationContext = pattern.setContext;
+            }
             const response = pattern.responses[Math.floor(Math.random() * pattern.responses.length)];
             return response.replace('$1', match[1] || '');
         }
@@ -123,18 +135,17 @@ if (SpeechRecognition) {
         // Get the latest result
         const transcript = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
         console.log("Heard:", transcript);
-        checkCombo(transcript);
-
-        // Check if it was a spell cast (we don't want to chat if they are casting)
-        const isSpell = transcript.includes('lumos') || transcript.includes('light') || transcript.includes('search') ||
-                        transcript.includes('inferno') || transcript.includes('fire') || transcript.includes('burn') ||
-                        transcript.includes('bolto') || transcript.includes('bolt') || transcript.includes('spark');
         
-        if (!isSpell) {
+        // Check for spell combo first
+        const wasSpellCast = checkCombo(transcript);
+
+        // If it wasn't a spell, then treat it as conversation
+        if (!wasSpellCast) {
             const responseText = getIntelligentResponse(transcript);
             if (responseText && assistantResponseElement) {
                 assistantResponseElement.innerText = responseText;
                 speakResponse(responseText);
+                // Clear the response after a few seconds
                 setTimeout(() => { if(assistantResponseElement.innerText === responseText) assistantResponseElement.innerText = ""; }, 5000);
             }
         }
@@ -161,7 +172,7 @@ if (SpeechRecognition) {
 }
 
 function checkCombo(voiceCommand) {
-    if (!currentRightHandGesture) return;
+    if (!currentRightHandGesture) return false; // No gesture, no combo
 
     // Map voice commands to spell IDs
     let spellId = null;
@@ -177,11 +188,13 @@ function checkCombo(voiceCommand) {
         if (lesson && currentRightHandGesture === lesson.gesture) {
             castSpell(spellId);
         } else {
-            feedbackElement.innerText = "Wrong move buddy";
+            feedbackElement.innerText = "Gesture mismatch!";
             feedbackElement.style.opacity = 1;
             setTimeout(() => feedbackElement.style.opacity = 0, 1000);
         }
+        return true; // A spell was attempted (successfully or not)
     }
+    return false; // No spell keyword was found
 }
 
 function castSpell(spellId) {
@@ -189,35 +202,13 @@ function castSpell(spellId) {
     // Logic: Learning Phase
     if (currentLessonIndex < lessons.length) {
         if (lessons[currentLessonIndex].id === spellId) {
-            feedbackElement.innerText = "Perfect Combo!";
+            feedbackElement.innerText = "Perfect!";
             feedbackElement.style.opacity = 1;
             spellNameElement.parentElement.style.display = 'none';
             
             // Lesson advancement is now handled when the gesture is released.
         }
     } 
-    // Logic: Free Play
-    else if (gameActive) {
-        // Interact with objects
-        interactables.forEach(obj => {
-            if (obj.active) return;
-            
-            // Distance check using the cached hand position
-            const scale = Math.max(0.1, (1000 - obj.z) / 1000);
-            const interactionRadius = 150 * scale; 
-            const dist = Math.hypot(obj.x - currentRightHandPos.x, obj.y - currentRightHandPos.y);
-
-            if (dist < interactionRadius) {
-                if ((spellId === 'inferno' && obj.type === 'torch') ||
-                    (spellId === 'bolto' && obj.type === 'crystal')) {
-                    
-                    obj.activate();
-                    // Extra effect on the object
-                    triggerSpellEffect(obj.x, obj.y, spellId);
-                }
-            }
-        });
-    }
 }
 
 // --- 1. EFFECT SYSTEM ---
@@ -238,9 +229,13 @@ class Interactable {
         // Initial visual state
         this.alpha = this.type === 'rune' ? 0 : 0.6; // Runes are invisible initially
         this.color = '#555';
+        this.brightness = 1.0;
+        this.destroyed = false;
+        this.isRepelling = false;
+        this.repelCounter = 0;
     }
 
-    update(w, h, speedX, speedZ, rightHandX, rightHandY, isLumosActive) {
+    update(w, h, speedX, speedZ, rightHandX, rightHandY, activeSpellId) {
         // Z movement (Zoom)
         this.z -= speedZ;
         if (this.z < 0) {
@@ -259,6 +254,14 @@ class Interactable {
         // X movement (Pan) - Move objects opposite to camera
         this.x += speedX * scale; 
         
+        // Repel Logic (Zoom away)
+        if (this.isRepelling) {
+            this.x += (this.x - w / 2) * 0.1;
+            this.y += (this.y - h / 2) * 0.1;
+            this.repelCounter--;
+            if (this.repelCounter <= 0) this.isRepelling = false;
+        }
+
         // Drift
         this.x += this.driftX;
         this.y += this.driftY;
@@ -269,19 +272,50 @@ class Interactable {
         if (this.y < -50) this.y = h + 50;
         if (this.y > h + 50) this.y = -50;
 
-        // Search Mechanic: Reveal Runes with Light
-        if (this.type === 'rune' && !this.active) {
-            this.alpha = 0;
-            if (isLumosActive && rightHandX !== null) {
-                const dist = Math.hypot(this.x - rightHandX, this.y - rightHandY);
-                const revealRadius = 250 * scale; // Radius scales with depth
+        // --- SPELL INTERACTIONS ---
+        if (rightHandX !== null) {
+            const dist = Math.hypot(this.x - rightHandX, this.y - rightHandY);
+            const interactionRadius = 200 * scale; // Radius scales with depth
+
+            // 1. SEARCH (Lumos): Brighten & Reveal
+            if (activeSpellId === 'lumos') {
+                if (dist < interactionRadius) {
+                    this.brightness = 2.5; // Brighten object
+                    if (this.type === 'rune' && !this.active) {
+                        this.alpha = Math.min(1, (1 - dist / interactionRadius) + 0.1);
+                        if (this.alpha >= 1) this.activate();
+                    }
+                }
+            }
+
+            // 2. DESTROY (Inferno): Explode Torches
+            if (activeSpellId === 'inferno') {
+                if (dist < interactionRadius) {
+                    if (this.type === 'torch') {
+                        this.destroyed = true;
+                        triggerSpellEffect(this.x, this.y, 'inferno');
+                        if (!this.active) { discoveries++; discoveriesElement.innerText = "Discoveries: " + discoveries; }
+                    }
+                }
+            }
+
+            // 3. SUMMON (Bolto): Pull All Objects
+            if (activeSpellId === 'bolto') {
+                // Magnetic pull
+                this.x += (rightHandX - this.x) * 0.08;
+                this.y += (rightHandY - this.y) * 0.08;
                 
-                if (dist < revealRadius) {
-                    // Fade in based on distance
-                    this.alpha = Math.min(1, (1 - dist / revealRadius) + 0.1);
+                if (this.type === 'crystal' && !this.active) {
+                    if (dist < 50 * scale) {
+                        this.activate();
+                        triggerSpellEffect(this.x, this.y, 'bolto');
+                    }
                 }
             }
         }
+        
+        // Decay brightness
+        if (this.brightness > 1.0) this.brightness -= 0.05;
     }
 
     activate() {
@@ -292,11 +326,17 @@ class Interactable {
         discoveriesElement.innerText = "Discoveries: " + discoveries;
     }
 
+    startRepelling() {
+        this.isRepelling = true;
+        this.repelCounter = 20;
+    }
+
     draw(ctx) {
         const scale = Math.max(0.1, (1000 - this.z) / 1000); // Scale based on depth, with a minimum size
         
         ctx.save();
         ctx.globalAlpha = this.active ? 1 : this.alpha * scale;
+        ctx.filter = `brightness(${this.brightness})`;
         
         ctx.beginPath();
         if (this.type === 'rune') {
@@ -477,7 +517,6 @@ function updateExploration(canvasWidth, canvasHeight, leftHand, rightHand) {
     // Calculate Interaction (Right Hand)
     let rightHandX = null;
     let rightHandY = null;
-    const isLumosActive = (activeSpellId === 'lumos');
     
     if (rightHand) {
         rightHandX = rightHand[9].x * canvasWidth;
@@ -489,7 +528,10 @@ function updateExploration(canvasWidth, canvasHeight, leftHand, rightHand) {
         interactables.push(new Interactable(canvasWidth, canvasHeight));
     }
 
-    interactables.forEach(obj => obj.update(canvasWidth, canvasHeight, speedX, speedZ, rightHandX, rightHandY, isLumosActive));
+    interactables.forEach(obj => obj.update(canvasWidth, canvasHeight, speedX, speedZ, rightHandX, rightHandY, activeSpellId));
+    
+    // Remove destroyed objects
+    interactables = interactables.filter(obj => !obj.destroyed);
     
     // Sort by depth so we draw far objects first
     interactables.sort((a, b) => a.z - b.z);
@@ -546,6 +588,11 @@ function onResults(results) {
                     x: landmarks[9].x * canvasElement.width,
                     y: landmarks[9].y * canvasElement.height
                 };
+
+                // Draw Gesture Label for feedback
+                canvasCtx.fillStyle = currentRightHandGesture === 'Unknown' ? 'red' : 'cyan';
+                canvasCtx.font = "20px Arial";
+                canvasCtx.fillText(currentRightHandGesture, currentRightHandPos.x + 20, currentRightHandPos.y);
             }
         }
     }
@@ -562,6 +609,10 @@ function onResults(results) {
         } else {
             // Gesture has changed or hand is lost, release the spell.
             
+            if (activeSpellId === 'bolto') {
+                interactables.forEach(obj => obj.startRepelling());
+            }
+
             // If we were learning this spell, advance to the next lesson.
             if (currentLessonIndex < lessons.length && lessons[currentLessonIndex].id === activeSpellId) {
                 currentLessonIndex++;
