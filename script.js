@@ -10,6 +10,10 @@ const gameHudElement = document.getElementById('game-hud');
 const discoveriesElement = document.getElementById('discoveries');
 const voiceCommandBtn = document.getElementById('voice-command-btn');
 
+// Create an off-screen canvas for the light painting effect
+const lightCanvas = document.createElement('canvas');
+const lightCtx = lightCanvas.getContext('2d');
+
 // State management
 let particles = [];
 let currentLessonIndex = 0;
@@ -541,13 +545,37 @@ function onResults(results) {
     if (canvasElement.width !== window.innerWidth || canvasElement.height !== window.innerHeight) {
         canvasElement.width = window.innerWidth;
         canvasElement.height = window.innerHeight;
+        // Also resize the light canvas
+        lightCanvas.width = window.innerWidth;
+        lightCanvas.height = window.innerHeight;
     }
     canvasCtx.save();
-    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    
+    // 1. Update the persistent light canvas
+    // Fade out old light trails
+    lightCtx.fillStyle = 'rgba(30, 30, 30, 0.05)';
+    lightCtx.fillRect(0, 0, lightCanvas.width, lightCanvas.height);
+    
+    // Paint new light if Lumos is active
+    if (activeSpellId === 'lumos' && currentRightHandPos) {
+        const radius = 150; // Smaller radius
+        const gradient = lightCtx.createRadialGradient(
+            currentRightHandPos.x, currentRightHandPos.y, 0, 
+            currentRightHandPos.x, currentRightHandPos.y, radius
+        );
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 0.5)'); // Paint with semi-transparent white for a softer feel
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        
+        lightCtx.fillStyle = gradient;
+        // Fill a circle at the hand's position
+        lightCtx.beginPath();
+        lightCtx.arc(currentRightHandPos.x, currentRightHandPos.y, radius, 0, Math.PI * 2);
+        lightCtx.fill();
+    }
 
-    // Draw background (hide video feed)
-    canvasCtx.fillStyle = '#1e1e1e';
-    canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+    // 2. Clear the main canvas and draw the light trails onto it
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    canvasCtx.drawImage(lightCanvas, 0, 0);
 
     let leftHand = null;
     let rightHand = null;
