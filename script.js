@@ -23,6 +23,9 @@ let currentRightHandGesture = null;
 let currentRightHandPos = null;
 let activeSpellId = null;
 
+let lastPanPos = null;
+let lastZoomDist = null;
+
 // Game State
 let gameActive = false;
 let interactables = [];
@@ -78,7 +81,7 @@ const conversationPatterns = [
     { regex: /thank/i, setContext: 'polite', responses: ["You are welcome.", "The Aether acknowledges your gratitude."] },
     { regex: /spell|cast|magic/i, setContext: 'magic', responses: ["Focus your intent.", "The magic is in your hands.", "Words and gestures, bound together."] },
     { regex: /help/i, responses: ["Open Palm: Search. Fist: Destroy. It's not rocket science."] },
-    { regex: /.*/, responses: ["The stars are silent on that matter.", "Interesting.", "Your voice ripples through the void.", "I am listening.", "Tell me more.", "Is that so?", "I have no idea what that means, but it sounded profound."]}
+    { regex: /.*/, responses: ["The stars are silent on that matter.", "Interesting.", "Your voice ripples through the void.", "I am listening.", "Huh?", "Tell me more.", "I have no idea what that means, but it sounded profound."]}
 ];
 
 function getIntelligentResponse(text) {
@@ -222,7 +225,7 @@ class Interactable {
         this.x = Math.random() * w;
         this.y = Math.random() * h;
         this.z = Math.random() * 1000; // Depth
-        this.size = Math.random() * 20 + 30;
+        this.size = Math.random() * 50 + 80;
         // Types correspond to spells: rune->Search, torch->Destroy, crystal->Summon
         const types = ['rune', 'torch', 'crystal'];
         this.type = types[Math.floor(Math.random() * types.length)];
@@ -239,9 +242,8 @@ class Interactable {
         this.repelCounter = 0;
     }
 
-    update(w, h, speedX, speedZ, rightHandX, rightHandY, activeSpellId) {
-        // Z movement (Zoom)
-        this.z -= speedZ;
+    update(w, h, rightHandX, rightHandY, activeSpellId) {
+        // Z movement (Zoom) is now handled externally
         if (this.z < 0) {
             this.z = 1000;
             this.x = Math.random() * w;
@@ -255,8 +257,7 @@ class Interactable {
 
         const scale = Math.max(0.1, (1000 - this.z) / 1000);
 
-        // X movement (Pan) - Move objects opposite to camera
-        this.x += speedX * scale; 
+        // X/Y movement (Pan) is now handled externally
         
         // Repel Logic (Zoom away)
         if (this.isRepelling) {
@@ -298,6 +299,7 @@ class Interactable {
                     if (this.type === 'torch') {
                         this.destroyed = true;
                         triggerSpellEffect(this.x, this.y, 'inferno');
+                        drawScorchMark(this.x, this.y, this.size * scale);
                         if (!this.active) { discoveries++; discoveriesElement.innerText = "Discoveries: " + discoveries; }
                     }
                 }
@@ -345,15 +347,15 @@ class Interactable {
         ctx.beginPath();
         if (this.type === 'rune') {
             ctx.fillStyle = this.active ? '#fff' : '#444';
-            ctx.font = `${40 * scale}px serif`;
+            ctx.font = `${this.size * scale}px serif`;
             ctx.fillText("ᚣ", this.x, this.y);
         } else if (this.type === 'torch') {
             ctx.fillStyle = this.active ? '#e67e22' : '#5d4037';
-            ctx.arc(this.x, this.y, 15 * scale, 0, Math.PI * 2);
+            ctx.arc(this.x, this.y, (this.size * 0.3) * scale, 0, Math.PI * 2);
             ctx.fill();
         } else if (this.type === 'crystal') {
             ctx.fillStyle = this.active ? '#00ffff' : '#2c3e50';
-            const size = 20 * scale;
+            const size = (this.size * 0.4) * scale;
             ctx.moveTo(this.x, this.y - size);
             ctx.lineTo(this.x + size * 0.75, this.y);
             ctx.lineTo(this.x, this.y + size);
@@ -471,8 +473,14 @@ function detectGesture(landmarks) {
     if (ringUp) fingersUpCount++;
     if (pinkyUp) fingersUpCount++;
 
+    // Pinch detection: Thumb and Index tips are close
+    const thumbTip = landmarks[4];
+    const indexTip = landmarks[8];
+    const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+
     if (fingersUpCount >= 4) return "Open Palm";
     if (fingersUpCount === 0) return "Closed Fist";
+    if (pinchDist < 0.08) return "Pinch";
     if (indexUp && !middleUp && !ringUp && !pinkyUp) return "Index Finger";
     
     return "Unknown";
@@ -494,6 +502,18 @@ function updateLessonUI() {
     }
 }
 
+function drawScorchMark(x, y, radius) {
+    const gradient = lightCtx.createRadialGradient(x, y, 0, x, y, radius);
+    gradient.addColorStop(0, 'rgba(10, 10, 10, 0.9)'); // Charred center
+    gradient.addColorStop(0.5, 'rgba(80, 20, 0, 0.5)'); // Burnt edge
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    
+    lightCtx.fillStyle = gradient;
+    lightCtx.beginPath();
+    lightCtx.arc(x, y, radius, 0, Math.PI * 2);
+    lightCtx.fill();
+}
+
 function triggerSpellEffect(x, y, type) {
     let count = 3;
     if (type === 'inferno') count = 15;
@@ -504,19 +524,8 @@ function triggerSpellEffect(x, y, type) {
     }
 }
 
-function updateExploration(canvasWidth, canvasHeight, leftHand, rightHand) {
+function updateExploration(canvasWidth, canvasHeight, rightHand, activeSpellId) {
     if (!gameActive) return;
-
-    // Calculate Navigation (Left Hand)
-    let speedX = 0;
-    let speedZ = 0;
-    if (leftHand) {
-        const palm = leftHand[9];
-        // X: Pan based on horizontal position (0.5 is center)
-        speedX = (palm.x - 0.5) * 40;
-        // Y: Zoom based on vertical position (Up = Zoom In)
-        speedZ = (0.5 - palm.y) * 40;
-    }
 
     // Calculate Interaction (Right Hand)
     let rightHandX = null;
@@ -532,7 +541,7 @@ function updateExploration(canvasWidth, canvasHeight, leftHand, rightHand) {
         interactables.push(new Interactable(canvasWidth, canvasHeight));
     }
 
-    interactables.forEach(obj => obj.update(canvasWidth, canvasHeight, speedX, speedZ, rightHandX, rightHandY, activeSpellId));
+    interactables.forEach(obj => obj.update(canvasWidth, canvasHeight, rightHandX, rightHandY, activeSpellId));
     
     // Remove destroyed objects
     interactables = interactables.filter(obj => !obj.destroyed);
@@ -591,9 +600,52 @@ function onResults(results) {
         }
     }
 
+    // --- NEW NAVIGATION LOGIC ---
+    const hands = results.multiHandLandmarks;
+    let isNavigating = false;
+    if (gameActive && hands && hands.length > 0) {
+        // PANNING (One Pinch)
+        if (hands.length === 1 && detectGesture(hands[0]) === 'Pinch') {
+            isNavigating = true;
+            const currentPos = { x: hands[0][9].x, y: hands[0][9].y };
+            if (lastPanPos) {
+                const deltaX = (currentPos.x - lastPanPos.x) * canvasElement.width;
+                const deltaY = (currentPos.y - lastPanPos.y) * canvasElement.height;
+                
+                interactables.forEach(obj => {
+                    obj.x += deltaX;
+                    obj.y += deltaY;
+                });
+            }
+            lastPanPos = currentPos;
+        } else {
+            lastPanPos = null;
+        }
+
+        // ZOOMING (Two Open Palms)
+        if (hands.length === 2 && detectGesture(hands[0]) === 'Open Palm' && detectGesture(hands[1]) === 'Open Palm') {
+            isNavigating = true;
+            const dist = Math.hypot(hands[0][9].x - hands[1][9].x, hands[0][9].y - hands[1][9].y);
+            if (lastZoomDist) {
+                const deltaDist = (dist - lastZoomDist) * 3000; // Zoom speed
+                interactables.forEach(obj => {
+                    obj.z -= deltaDist;
+                });
+            }
+            lastZoomDist = dist;
+        } else {
+            lastZoomDist = null;
+        }
+    } else {
+        lastPanPos = null;
+        lastZoomDist = null;
+    }
+
     // Draw Game Elements
     if (gameActive) {
-        updateExploration(canvasElement.width, canvasElement.height, leftHand, rightHand, activeSpellId);
+        // The navigation logic above has already moved the objects.
+        // updateExploration now just handles non-navigational updates.
+        updateExploration(canvasElement.width, canvasElement.height, rightHand, activeSpellId);
         interactables.forEach(obj => obj.draw(canvasCtx));
     }
 
