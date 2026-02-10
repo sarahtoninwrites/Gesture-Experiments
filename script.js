@@ -10,10 +10,6 @@ const gameHudElement = document.getElementById('game-hud');
 const discoveriesElement = document.getElementById('discoveries');
 const voiceCommandBtn = document.getElementById('voice-command-btn');
 
-// Create an off-screen canvas for the light painting effect
-const lightCanvas = document.createElement('canvas');
-const lightCtx = lightCanvas.getContext('2d');
-
 // State management
 let particles = [];
 let currentLessonIndex = 0;
@@ -25,6 +21,7 @@ let activeSpellId = null;
 
 let lastPanPos = null;
 let lastZoomDist = null;
+let currentStroke = null;
 
 // Game State
 let gameActive = false;
@@ -52,6 +49,12 @@ const lessons = [
         instruction: "Point Finger and say 'Bolto'.", 
         gesture: "Index Finger",
         color: "255, 215, 0"
+    },
+    {
+        id: "creo",
+        title: "Create",
+        instruction: "Show Victory sign and say 'Draw'.",
+        gesture: "Victory"
     }
 ];
 
@@ -186,6 +189,7 @@ function checkCombo(voiceCommand) {
     if (voiceCommand.includes('lumos') || voiceCommand.includes('light') || voiceCommand.includes('search')) spellId = 'lumos';
     else if (voiceCommand.includes('inferno') || voiceCommand.includes('fire') || voiceCommand.includes('burn')) spellId = 'inferno';
     else if (voiceCommand.includes('bolto') || voiceCommand.includes('bolt') || voiceCommand.includes('spark')) spellId = 'bolto';
+    else if (voiceCommand.includes('creo') || voiceCommand.includes('draw') || voiceCommand.includes('create') || voiceCommand.includes('crio') || voiceCommand.includes('cryo')) spellId = 'creo';
 
     if (spellId) {
         // Find the required gesture for this spell
@@ -221,25 +225,48 @@ function castSpell(spellId) {
 // --- 1. EFFECT SYSTEM ---
 
 class Interactable {
-    constructor(w, h) {
-        this.x = Math.random() * w;
-        this.y = Math.random() * h;
-        this.z = Math.random() * 1000; // Depth
-        this.size = Math.random() * 50 + 80;
-        // Types correspond to spells: rune->Search, torch->Destroy, crystal->Summon
-        const types = ['rune', 'torch', 'crystal'];
-        this.type = types[Math.floor(Math.random() * types.length)];
-        this.active = false;
-        this.driftX = (Math.random() - 0.5) * 0.2; // Slower drift
-        this.driftY = (Math.random() - 0.5) * 0.2;
+    constructor(w, h, type = null, x = 0, y = 0) {
+        if (type === 'ink_stroke') {
+            this.type = type;
+            this.x = x;
+            this.y = y;
+            this.z = 200; // Spawn slightly in front
+            this.points = [{dx: 0, dy: 0, dz: 0}];
+            this.size = 8;
+            this.active = true; // Ink is always "active"
+            this.color = `hsl(${Math.random() * 360}, 100%, 70%)`;
+            this.driftX = 0;
+            this.driftY = 0;
+            this.vx = 0;
+            this.vy = 0;
+        } else {
+            this.x = Math.random() * w;
+            this.y = Math.random() * h;
+            this.z = Math.random() * 1000; // Depth
+            this.size = Math.random() * 50 + 80;
+            // Types correspond to spells: rune->Search, torch->Destroy, crystal->Summon
+            const types = ['rune', 'torch', 'crystal'];
+            this.type = types[Math.floor(Math.random() * types.length)];
+            this.active = false;
+            this.driftX = (Math.random() - 0.5) * 0.2; // Slower drift
+            this.driftY = (Math.random() - 0.5) * 0.2;
+            this.color = '#555';
+        }
         
         // Initial visual state
         this.alpha = this.type === 'rune' ? 0 : 0.6; // Runes are invisible initially
-        this.color = '#555';
         this.brightness = 1.0;
         this.destroyed = false;
         this.isRepelling = false;
         this.repelCounter = 0;
+    }
+
+    addPoint(x, y) {
+        this.points.push({
+            dx: x - this.x,
+            dy: y - this.y,
+            dz: 0
+        });
     }
 
     update(w, h, rightHandX, rightHandY, activeSpellId) {
@@ -267,15 +294,17 @@ class Interactable {
             if (this.repelCounter <= 0) this.isRepelling = false;
         }
 
-        // Drift
-        this.x += this.driftX;
-        this.y += this.driftY;
-
-        // Wrap around screen
-        if (this.x < -50) this.x = w + 50;
-        if (this.x > w + 50) this.x = -50;
-        if (this.y < -50) this.y = h + 50;
-        if (this.y > h + 50) this.y = -50;
+        if (this.type !== 'ink_stroke') {
+            // Drift for normal objects
+            this.x += this.driftX;
+            this.y += this.driftY;
+            
+            // Wrap around screen
+            if (this.x < -50) this.x = w + 50;
+            if (this.x > w + 50) this.x = -50;
+            if (this.y < -50) this.y = h + 50;
+            if (this.y > h + 50) this.y = -50;
+        }
 
         // --- SPELL INTERACTIONS ---
         if (rightHandX !== null) {
@@ -361,6 +390,19 @@ class Interactable {
             ctx.lineTo(this.x, this.y + size);
             ctx.lineTo(this.x - size * 0.75, this.y);
             ctx.fill();
+        } else if (this.type === 'ink_stroke') {
+            ctx.strokeStyle = this.color;
+            ctx.lineWidth = this.size * scale;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            if (this.points.length > 0) {
+                ctx.moveTo(this.x + this.points[0].dx, this.y + this.points[0].dy);
+                for (let i = 1; i < this.points.length; i++) {
+                    ctx.lineTo(this.x + this.points[i].dx, this.y + this.points[i].dy);
+                }
+            }
+            ctx.stroke();
         }
         ctx.restore();
     }
@@ -481,6 +523,7 @@ function detectGesture(landmarks) {
     if (fingersUpCount >= 4) return "Open Palm";
     if (fingersUpCount === 0) return "Closed Fist";
     if (pinchDist < 0.08) return "Pinch";
+    if (indexUp && middleUp && !ringUp && !pinkyUp) return "Victory";
     if (indexUp && !middleUp && !ringUp && !pinkyUp) return "Index Finger";
     
     return "Unknown";
@@ -503,15 +546,15 @@ function updateLessonUI() {
 }
 
 function drawScorchMark(x, y, radius) {
-    const gradient = lightCtx.createRadialGradient(x, y, 0, x, y, radius);
+    const gradient = canvasCtx.createRadialGradient(x, y, 0, x, y, radius);
     gradient.addColorStop(0, 'rgba(10, 10, 10, 0.9)'); // Charred center
     gradient.addColorStop(0.5, 'rgba(80, 20, 0, 0.5)'); // Burnt edge
     gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
     
-    lightCtx.fillStyle = gradient;
-    lightCtx.beginPath();
-    lightCtx.arc(x, y, radius, 0, Math.PI * 2);
-    lightCtx.fill();
+    canvasCtx.fillStyle = gradient;
+    canvasCtx.beginPath();
+    canvasCtx.arc(x, y, radius, 0, Math.PI * 2);
+    canvasCtx.fill();
 }
 
 function triggerSpellEffect(x, y, type) {
@@ -534,6 +577,20 @@ function updateExploration(canvasWidth, canvasHeight, rightHand, activeSpellId) 
     if (rightHand) {
         rightHandX = rightHand[9].x * canvasWidth;
         rightHandY = rightHand[9].y * canvasHeight;
+
+        // Spawn Ink if Creo is active
+        if (activeSpellId === 'creo') {
+            if (!currentStroke) {
+                currentStroke = new Interactable(canvasWidth, canvasHeight, 'ink_stroke', rightHandX, rightHandY);
+                interactables.push(currentStroke);
+            } else {
+                currentStroke.addPoint(rightHandX, rightHandY);
+            }
+        } else {
+            currentStroke = null;
+        }
+    } else {
+        currentStroke = null;
     }
 
     // Initial Spawn
@@ -554,37 +611,10 @@ function onResults(results) {
     if (canvasElement.width !== window.innerWidth || canvasElement.height !== window.innerHeight) {
         canvasElement.width = window.innerWidth;
         canvasElement.height = window.innerHeight;
-        // Also resize the light canvas
-        lightCanvas.width = window.innerWidth;
-        lightCanvas.height = window.innerHeight;
     }
     canvasCtx.save();
     
-    // 1. Update the persistent light canvas
-    // Fade out old light trails
-    lightCtx.fillStyle = 'rgba(30, 30, 30, 0.05)';
-    lightCtx.fillRect(0, 0, lightCanvas.width, lightCanvas.height);
-    
-    // Paint new light if Lumos is active
-    if (activeSpellId === 'lumos' && currentRightHandPos) {
-        const radius = 150; // Smaller radius
-        const gradient = lightCtx.createRadialGradient(
-            currentRightHandPos.x, currentRightHandPos.y, 0, 
-            currentRightHandPos.x, currentRightHandPos.y, radius
-        );
-        gradient.addColorStop(0, 'rgba(255, 255, 255, 0.5)'); // Paint with semi-transparent white for a softer feel
-        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        
-        lightCtx.fillStyle = gradient;
-        // Fill a circle at the hand's position
-        lightCtx.beginPath();
-        lightCtx.arc(currentRightHandPos.x, currentRightHandPos.y, radius, 0, Math.PI * 2);
-        lightCtx.fill();
-    }
-
-    // 2. Clear the main canvas and draw the light trails onto it
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-    canvasCtx.drawImage(lightCanvas, 0, 0);
 
     let leftHand = null;
     let rightHand = null;
@@ -601,13 +631,10 @@ function onResults(results) {
     }
 
     // --- NEW NAVIGATION LOGIC ---
-    const hands = results.multiHandLandmarks;
-    let isNavigating = false;
-    if (gameActive && hands && hands.length > 0) {
-        // PANNING (One Pinch)
-        if (hands.length === 1 && detectGesture(hands[0]) === 'Pinch') {
-            isNavigating = true;
-            const currentPos = { x: hands[0][9].x, y: hands[0][9].y };
+    if (gameActive) {
+        // PANNING (Left Hand Pinch)
+        if (leftHand && detectGesture(leftHand) === 'Pinch') {
+            const currentPos = { x: leftHand[9].x, y: leftHand[9].y };
             if (lastPanPos) {
                 const deltaX = (currentPos.x - lastPanPos.x) * canvasElement.width;
                 const deltaY = (currentPos.y - lastPanPos.y) * canvasElement.height;
@@ -623,9 +650,8 @@ function onResults(results) {
         }
 
         // ZOOMING (Two Open Palms)
-        if (hands.length === 2 && detectGesture(hands[0]) === 'Open Palm' && detectGesture(hands[1]) === 'Open Palm') {
-            isNavigating = true;
-            const dist = Math.hypot(hands[0][9].x - hands[1][9].x, hands[0][9].y - hands[1][9].y);
+        if (leftHand && rightHand && detectGesture(leftHand) === 'Open Palm' && detectGesture(rightHand) === 'Open Palm') {
+            const dist = Math.hypot(leftHand[9].x - rightHand[9].x, leftHand[9].y - rightHand[9].y);
             if (lastZoomDist) {
                 const deltaDist = (dist - lastZoomDist) * 3000; // Zoom speed
                 interactables.forEach(obj => {
